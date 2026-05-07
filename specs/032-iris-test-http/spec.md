@@ -5,6 +5,16 @@
 **Status**: Draft  
 **Closes**: #31
 
+## Clarifications
+
+### Session 2026-05-07
+
+- Q: How is the jUnit XML file read back after `RunTest()` writes it? → A: Option B — a second `execute_via_generator` call reads the file via ObjectScript file I/O (`%Stream.FileCharacter` or equivalent) and Writes its contents back as output. Additionally, the progressive disclosure pattern (027 log store) applies: full parsed jUnit detail is stored under a UUID, compact summary (pass/fail counts, suite names) returned inline, `log_id` provided for drill-down via `iris_get_log`.
+- Q: How does the `^UnitTestRoot` globals fallback map to the response JSON shape? → A: Option A — best-effort mapping using the same JSON shape as the jUnit path; fields unavailable from globals (duration, skipped count) are null/zero; response includes `"source": "globals_fallback"` to signal degraded mode.
+- Q: Which toolset tier should the HTTP path enhancement be available in? → A: Option A — all tiers (Baseline). HTTP path makes `iris_test` work where it previously returned `DOCKER_REQUIRED`; restricting to Merged would deprive community/nostub users of the fix.
+
+---
+
 ## Overview
 
 The current `iris_test` tool requires `IRIS_CONTAINER` to be set (docker exec path) and immediately returns `DOCKER_REQUIRED` when it isn't. This means developers using IRIS without docker — or with a docker container that doesn't have exec accessible — have no way to run unit tests through iris-dev. The workaround discovered in practice (multi-step `iris_execute` → query `^UnitTestRoot` globals) works but requires many iterations and is fragile.
@@ -80,13 +90,13 @@ An agent running tests can tell the difference between "tests ran but some faile
 ### Functional Requirements
 
 - **FR-001**: When `IRIS_CONTAINER` is not set, `iris_test` MUST execute `%UnitTest.Manager.RunTest()` via the HTTP execution path (Atelier REST) rather than docker exec.
-- **FR-002**: `iris_test` MUST pass the `/junit=<temp_path>` qualifier to `RunTest()` to capture results as jUnit XML in a unique temporary file path (UUID-keyed to avoid concurrent run collisions).
-- **FR-003**: After execution, `iris_test` MUST read the jUnit XML file back, parse it, and return structured JSON in a single tool response.
-- **FR-004**: The structured JSON response MUST include: `success` (bool), `total` (int), `passed` (int), `failed` (int), `errors` (int), `skipped` (int), `duration_ms` (float), `path` (enum: `"http"` | `"docker"` | `"http_fallback"`), `test_suites` (array).
+- **FR-002**: `iris_test` MUST pass the `/junit=<temp_path>` qualifier to `RunTest()` to capture results as jUnit XML in a unique temporary file path using `##class(%File).TempFilename()` (portable across all IRIS platforms including Windows; UUID suffix appended to guarantee uniqueness across concurrent runs).
+- **FR-003**: After execution, `iris_test` MUST read the jUnit XML file back via a second `execute_via_generator` call that uses ObjectScript file I/O (`%Stream.FileCharacter`) to read and Write the file contents. The full parsed jUnit detail MUST be stored in the progressive disclosure log store (027) under a UUID, the compact summary returned inline, and `log_id` included in the response for drill-down via `iris_get_log`.
+- **FR-004**: The inline (compact) response MUST include: `success` (bool), `total` (int), `passed` (int), `failed` (int), `errors` (int), `skipped` (int), `duration_ms` (float), `path` (enum: `"http"` | `"docker"` | `"http_fallback"`), `log_id` (string — UUID for full detail), `test_suites` (array of suite-level summaries: name + counts only, no per-test-case detail inline).
 - **FR-005**: Each test suite object MUST include: `name` (string), `tests` (int), `failures` (int), `errors` (int), `duration_ms` (float), `test_cases` (array).
 - **FR-006**: Each test case object MUST include: `name` (string), `class_name` (string), `status` (enum: `"passed"` | `"failed"` | `"error"` | `"skipped"`), `duration_ms` (float), `failure_message` (string or null).
 - **FR-007**: When `IRIS_CONTAINER` is set, `iris_test` MUST use the existing docker exec path. If docker exec fails, it MUST attempt the HTTP fallback and set `path: "http_fallback"`.
-- **FR-008**: If the jUnit file cannot be read or parsed, `iris_test` MUST fall back to reading `^UnitTestRoot` globals and return the same JSON shape with `"source": "globals_fallback"`.
+- **FR-008**: If the jUnit file cannot be read or parsed, `iris_test` MUST fall back to reading `^UnitTestRoot` globals via `iris_query` and return the same JSON shape (best-effort: fields unavailable from globals such as `duration_ms` and `skipped` are null/zero) with `"source": "globals_fallback"` in the response. The log store entry for the fallback path MUST still be created using the globals-derived data.
 - **FR-009**: The temporary jUnit file MUST be deleted after reading, regardless of success or failure.
 - **FR-010**: `iris_test` MUST accept a `timeout` parameter (default: 60 seconds) that bounds the test run duration.
 
@@ -114,6 +124,6 @@ An agent running tests can tell the difference between "tests ran but some faile
 
 - Test classes are already compiled in the target IRIS namespace. Compilation is not part of this feature.
 - `/junit` qualifier for `%UnitTest.Manager.RunTest()` is available on IRIS 2019.1+. For older versions, the `^UnitTestRoot` fallback path covers the gap.
-- The IRIS instance has a writable `/tmp` directory accessible to the IRIS process (standard on all supported platforms). The temp file path uses `/tmp/iris_dev_junit_{uuid}.xml`.
+- Temp file path is obtained via `##class(%File).TempFilename()` (portable across all IRIS platforms including Windows) with a UUID suffix appended for concurrent-run uniqueness. No assumption about `/tmp` being available.
 - jUnit XML produced by IRIS's `%UnitTest.Manager` follows the standard Ant/JUnit XML schema.
 - The HTTP execution path has sufficient output buffer for jUnit XML from typical test suites (hundreds of test cases). Very large suites (1000+ tests) may need chunked reads — deferred to a follow-on issue.
