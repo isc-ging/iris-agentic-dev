@@ -75,8 +75,11 @@ export class IrisDevMcpProvider
     this.log.show(true);   // reveal without stealing focus
     this.log.info('iris-dev: provideMcpServerDefinitions called');
 
+    // Use workspace folder scope to honour .vscode/settings.json (fix #42).
+    // Falls back to global scope when no workspace folder is open.
+    const wsFolder = vscode.workspace.workspaceFolders?.[0];
     const conn = vscode.workspace
-      .getConfiguration('objectscript', null)
+      .getConfiguration('objectscript', wsFolder ?? null)
       .get<ObjectScriptConn>('conn');
 
     this.log.info(`iris-dev: objectscript.conn = ${JSON.stringify(conn)}`);
@@ -107,7 +110,6 @@ export class IrisDevMcpProvider
     // when the workspace has no intersystems config of its own.
     let named: NamedServer | null = null;
     if (conn.server) {
-      const wsFolder = vscode.workspace.workspaceFolders?.[0];
       const wsServers = vscode.workspace
         .getConfiguration('intersystems', wsFolder ?? null)
         .get<Record<string, NamedServer>>('servers');
