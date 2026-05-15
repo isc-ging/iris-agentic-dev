@@ -16,6 +16,7 @@ Wires [iris-dev](https://github.com/intersystems-community/iris-dev) MCP tools i
 | `iris-dev.containerName` | _(empty)_ | Docker container name for tools requiring direct IRIS access. |
 | `iris-dev.tlsVerify` | `true` | Verify TLS certificates. Set `false` for self-signed certs. |
 | `iris-dev.toolset` | `baseline` | Tool set: `baseline`, `nostub`, or `merged` (includes interop/container tools). |
+| `iris-dev.namespace` | _(conn ns)_ | Override the IRIS namespace. Leave empty to use objectscript.conn namespace. |
 
 ## Links
 

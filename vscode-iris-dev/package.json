@@ -2,7 +2,7 @@
   "name": "vscode-iris-dev",
   "displayName": "iris-dev for IRIS",
   "description": "Wires iris-dev MCP tools into VS Code Copilot agent mode — automatically picks up your objectscript.conn connection. Requires the iris-dev binary on PATH.",
-  "version": "0.2.6",
+  "version": "0.4.21",
   "publisher": "intersystems-community",
   "license": "MIT",
   "engines": {
@@ -48,6 +48,11 @@
           "type": "boolean",
           "default": true,
           "description": "Verify TLS certificates when connecting to IRIS over HTTPS. Set to false for self-signed certificates. Also disabled automatically when http.proxyStrictSSL is false."
+        },
+        "iris-dev.namespace": {
+          "type": "string",
+          "default": "",
+          "description": "IRIS namespace override. Leave empty to use the namespace from objectscript.conn. Useful when you want iris-dev to target a different namespace than your editor connection."
         },
         "iris-dev.toolset": {
           "type": "string",
