@@ -1,4 +1,4 @@
-# iris-dev
+# iris-agentic-dev
 
 Connect GitHub Copilot, Claude Code, or any MCP-compatible AI assistant directly to a live InterSystems IRIS instance. Your AI can compile, test, search, read, write, and debug ObjectScript without leaving the chat.
 
@@ -6,7 +6,7 @@ Connect GitHub Copilot, Claude Code, or any MCP-compatible AI assistant directly
 
 ## How it works
 
-iris-dev runs as a local MCP (Model Context Protocol) server. Your AI assistant calls its tools — `iris_compile`, `iris_doc`, `iris_execute`, etc. — and iris-dev executes them against your real IRIS instance over the Atelier REST API. The AI sees compile errors, class definitions, and execution output in-line, the same way it would with a local filesystem.
+iris-agentic-dev runs as a local MCP (Model Context Protocol) server. Your AI assistant calls its tools — `iris_compile`, `iris_doc`, `iris_execute`, etc. — and iris-dev executes them against your real IRIS instance over the Atelier REST API. The AI sees compile errors, class definitions, and execution output in-line, the same way it would with a local filesystem.
 
 ---
 
@@ -15,21 +15,21 @@ iris-dev runs as a local MCP (Model Context Protocol) server. Your AI assistant 
 ### Option A: IRIS in Docker (local dev)
 
 ```bash
-# 1. Install iris-dev (Mac Apple Silicon)
-curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-dev-macos-arm64 \
-  -o /usr/local/bin/iris-dev && chmod +x /usr/local/bin/iris-dev
-xattr -d com.apple.quarantine /usr/local/bin/iris-dev 2>/dev/null
+# 1. Install iris-agentic-dev (Mac Apple Silicon)
+curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-macos-arm64 \
+  -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
+xattr -d com.apple.quarantine /usr/local/bin/iris-agentic-dev 2>/dev/null
 
-# 2. Let iris-dev find your container automatically
-iris-dev init              # writes .iris-dev.toml from your running containers
+# 2. Let iris-agentic-dev find your container automatically
+iris-agentic-dev init              # writes .iris-agentic-dev.toml from your running containers
 
 # 3. Add to Claude Code (~/.claude/settings.json)
 ```
 ```json
 {
   "mcpServers": {
-    "iris-dev": {
-      "command": "iris-dev",
+    "iris-agentic-dev": {
+      "command": "iris-agentic-dev",
       "args": ["mcp"],
       "env": { "OBJECTSCRIPT_WORKSPACE": "${workspaceFolder}" }
     }
@@ -40,13 +40,13 @@ iris-dev init              # writes .iris-dev.toml from your running containers
 ### Option B: Remote or server IRIS (no Docker)
 
 ```bash
-# Set connection via env vars — no .iris-dev.toml needed
+# Set connection via env vars — no .iris-agentic-dev.toml needed
 ```
 ```json
 {
   "mcpServers": {
-    "iris-dev": {
-      "command": "iris-dev",
+    "iris-agentic-dev": {
+      "command": "iris-agentic-dev",
       "args": ["mcp"],
       "env": {
         "IRIS_HOST": "iris.example.com",
@@ -70,9 +70,9 @@ For HTTPS or a non-root web gateway path:
 ### Option C: VS Code Copilot Agent Mode
 
 1. Install the binary (see [Installation](#installation) below)
-2. Download `vscode-iris-dev-*.vsix` from the [releases page](https://github.com/intersystems-community/iris-dev/releases/latest)
+2. Download `vscode-iris-agentic-dev-*.vsix` from the [releases page](https://github.com/intersystems-community/iris-dev/releases/latest)
 3. In VS Code: Extensions (`Ctrl+Shift+X`) → `...` → **Install from VSIX**
-4. Reload VS Code — **iris-dev (IRIS)** appears automatically in Copilot Chat → Agent mode → tools
+4. Reload VS Code — **iris-agentic-dev (IRIS)** appears automatically in Copilot Chat → Agent mode → tools
 
 The extension reads your existing `objectscript.conn` and `intersystems.servers` config — no extra setup if you already use the InterSystems VS Code extensions.
 
@@ -85,9 +85,9 @@ The extension reads your existing `objectscript.conn` and `intersystems.servers`
 ```bash
 # Apple Silicon (M1/M2/M3):
 sudo mkdir -p /usr/local/bin
-curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-dev-macos-arm64 \
-  -o /usr/local/bin/iris-dev && chmod +x /usr/local/bin/iris-dev
-xattr -d com.apple.quarantine /usr/local/bin/iris-dev 2>/dev/null
+curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-macos-arm64 \
+  -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
+xattr -d com.apple.quarantine /usr/local/bin/iris-agentic-dev 2>/dev/null
 
 # Intel Mac: replace "arm64" with "x86_64" above
 ```
@@ -95,17 +95,17 @@ xattr -d com.apple.quarantine /usr/local/bin/iris-dev 2>/dev/null
 ### Linux
 
 ```bash
-curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-dev-linux-x86_64 \
-  -o /usr/local/bin/iris-dev && chmod +x /usr/local/bin/iris-dev
+curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-linux-x86_64 \
+  -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
 ```
 
 ### Windows
 
 1. Download `iris-dev-windows-x86_64.exe` from the [releases page](https://github.com/intersystems-community/iris-dev/releases/latest)
-2. Save it somewhere permanent, e.g. `C:\Users\yourname\bin\iris-dev.exe`
+2. Save it somewhere permanent, e.g. `C:\Users\yourname\bin\iris-agentic-dev.exe`
 3. In VS Code User Settings (JSON), set the binary path:
 ```json
-"iris-dev.serverPath": "C:\\Users\\yourname\\bin\\iris-dev.exe"
+"iris-agentic-dev.serverPath": "C:\\Users\\yourname\\bin\\iris-dev.exe"
 ```
 
 > **WSL2**: Use the Windows binary. Set `IRIS_HOST` to the Windows host IP — `localhost` in WSL2 resolves to the Linux VM, not the Windows host.
@@ -114,7 +114,7 @@ curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/do
 
 ## Tools
 
-iris-dev exposes 23 tools to your AI assistant:
+iris-agentic-dev exposes 23 tools to your AI assistant:
 
 | Tool | Needs Docker? | What it does |
 |------|:---:|-------------|
@@ -161,7 +161,7 @@ Tools marked **✓ Needs Docker** require `IRIS_CONTAINER` to be set. Tools with
 | `IRIS_PASSWORD` | `SYS` | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default namespace |
 | `IRIS_CONTAINER` | _(empty)_ | Docker container name — required for Docker-dependent tools |
-| `OBJECTSCRIPT_WORKSPACE` | `$PWD` | Workspace root for `.iris-dev.toml` lookup |
+| `OBJECTSCRIPT_WORKSPACE` | `$PWD` | Workspace root for `.iris-agentic-dev.toml` lookup |
 | `IRIS_LOG_STORE_MAX` | `50` | Max entries in the progressive disclosure log store. Oldest entry evicted when full. |
 | `IRIS_LOG_TTL_MINUTES` | `60` | Minutes before a log entry expires. Expired entries return `LOG_EXPIRED`. |
 | `IRIS_INLINE_COMPILE` | `20` | `iris_compile`: max distinct error/warning entries returned inline before truncation. |
@@ -169,7 +169,7 @@ Tools marked **✓ Needs Docker** require `IRIS_CONTAINER` to be set. Tools with
 | `IRIS_INLINE_INFO` | `30` | `iris_info` (what=documents): max document entries returned inline before truncation. |
 | `IRIS_INLINE_ERROR_LOGS` | `20` | `debug_get_error_logs`: max log entries returned inline before truncation. |
 
-### `.iris-dev.toml` (per-project config)
+### `.iris-agentic-dev.toml` (per-project config)
 
 Drop this file in your project root and commit it so teammates get the same setup automatically.
 
@@ -185,11 +185,11 @@ namespace = "MYAPP"
 # web_prefix = "irisaicore" # for non-root gateway path
 ```
 
-Generate from your running containers: `iris-dev init`
+Generate from your running containers: `iris-agentic-dev init`
 
 ### Enterprise containers (intersystems/iris, intersystems/irishealth)
 
-Enterprise images ship with `WebServer=0` — no private web server. The standard solution is the ISC Web Gateway container alongside IRIS. iris-dev auto-detects it.
+Enterprise images ship with `WebServer=0` — no private web server. The standard solution is the ISC Web Gateway container alongside IRIS. iris-agentic-dev auto-detects it.
 
 ```yaml
 # docker-compose snippet
@@ -199,7 +199,7 @@ services:
     ports: ["4972:1972"]
   webgateway:
     image: containers.intersystems.com/intersystems/webgateway:2026.1
-    ports: ["52773:80"]            # iris-dev scans port 52773
+    ports: ["52773:80"]            # iris-agentic-dev scans port 52773
     entrypoint: ["/bin/sh", "/init.sh"]
     volumes: ["./webgateway-init.sh:/init.sh:ro"]
 ```
@@ -208,10 +208,10 @@ Three non-obvious setup gotchas in fresh containers — see [`iris-vscode-object
 
 ### Connection discovery order
 
-iris-dev resolves the connection in this order — first match wins:
+iris-agentic-dev resolves the connection in this order — first match wins:
 
 1. CLI flags (`--host`, `--web-port`, `--scheme`)
-2. `.iris-dev.toml` in the workspace root
+2. `.iris-agentic-dev.toml` in the workspace root
 3. Environment variables (`IRIS_HOST`, etc.)
 4. VS Code `settings.json` (`objectscript.conn` / `intersystems.servers`)
 5. Docker containers (scored by workspace name similarity)
@@ -219,25 +219,25 @@ iris-dev resolves the connection in this order — first match wins:
 
 ### VS Code: Server Manager integration
 
-If you use the InterSystems VS Code extensions, iris-dev reads your server definitions automatically. Your `objectscript.conn` should reference a named server so the full definition (including `pathPrefix` for non-standard gateways) is picked up:
+If you use the InterSystems VS Code extensions, iris-agentic-dev reads your server definitions automatically. Your `objectscript.conn` should reference a named server so the full definition (including `pathPrefix` for non-standard gateways) is picked up:
 
 ```json
 "objectscript.conn": { "active": true, "server": "your-server-name" }
 ```
 
-If iris-dev can't find your server: `View > Output > iris-dev` shows which servers were found and where.
+If iris-agentic-dev can't find your server: `View > Output > iris-agentic-dev` shows which servers were found and where.
 
-**Secure credential storage**: If the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) extension is installed, iris-dev uses it to retrieve credentials from the OS keychain. On first use you'll be prompted for username and password. When the password prompt appears, **click the 🔑 key icon** before pressing Enter to store it in the keychain — subsequent VS Code restarts will then be fully silent. Pressing Enter without clicking 🔑 uses the password for the current session only. Server Manager is optional; without it iris-dev falls back to credentials in your server definition or MCP env vars.
+**Secure credential storage**: If the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) extension is installed, iris-agentic-dev uses it to retrieve credentials from the OS keychain. On first use you'll be prompted for username and password. When the password prompt appears, **click the 🔑 key icon** before pressing Enter to store it in the keychain — subsequent VS Code restarts will then be fully silent. Pressing Enter without clicking 🔑 uses the password for the current session only. Server Manager is optional; without it iris-agentic-dev falls back to credentials in your server definition or MCP env vars.
 
 ---
 
 ## Commands
 
 ```bash
-iris-dev mcp           # Start the MCP server (used by Claude Code / Copilot)
-iris-dev compile MyApp.Foo.cls   # Compile from the terminal
-iris-dev init          # Generate .iris-dev.toml from running containers
-iris-dev --version     # Check version
+iris-agentic-dev mcp           # Start the MCP server (used by Claude Code / Copilot)
+iris-agentic-dev compile MyApp.Foo.cls   # Compile from the terminal
+iris-agentic-dev init          # Generate .iris-agentic-dev.toml from running containers
+iris-agentic-dev --version     # Check version
 ```
 
 ---

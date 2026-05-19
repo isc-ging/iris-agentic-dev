@@ -1,0 +1,204 @@
+[package]
+name = "iris-agentic-dev-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rmcp.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+bollard.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+toml.workspace = true
+semver.workspace = true
+anyhow.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+urlencoding = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "5"
+tree-sitter = "0.26"
+tree-sitter-objectscript = "1.7"
+tree-sitter-objectscript-routine = "1.7"
+
+# Test dependencies
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+tempfile = "3"
+serde_json.workspace = true
+reqwest.workspace = true
+wiremock = "0.6"
+
+[[test]]
+name = "discovery_tests"
+path = "tests/discovery_tests.rs"
+
+[[test]]
+name = "manifest_tests"
+path = "tests/manifest_tests.rs"
+
+[[test]]
+name = "mcp_handshake"
+path = "tests/mcp_handshake.rs"
+
+[[test]]
+name = "vscode_config_tests"
+path = "tests/vscode_config_tests.rs"
+
+[[test]]
+name = "skills_tests"
+path = "tests/skills_tests.rs"
+
+[[test]]
+name = "test_mcp_iris"
+path = "tests/integration/test_mcp_iris.rs"
+
+[[test]]
+name = "test_compile_cmd"
+path = "tests/integration/test_compile_cmd.rs"
+
+[[test]]
+name = "interop_unit_tests"
+path = "tests/interop_unit_tests.rs"
+
+[[test]]
+name = "interop_e2e_tests"
+path = "tests/interop_e2e_tests.rs"
+
+[[test]]
+name = "test_compile_params"
+path = "tests/unit/test_compile_params.rs"
+
+[[test]]
+name = "test_e2e_all_tools"
+path = "tests/integration/test_e2e_all_tools.rs"
+
+[[test]]
+name = "test_elicitation"
+path = "tests/unit/test_elicitation.rs"
+
+[[test]]
+name = "test_scm"
+path = "tests/integration/test_scm.rs"
+
+[[test]]
+name = "test_doc_params"
+path = "tests/unit/test_doc_params.rs"
+
+[[test]]
+name = "test_connection_fixes"
+path = "tests/unit/test_connection_fixes.rs"
+
+[[test]]
+name = "test_elicitation_sweep"
+path = "tests/unit/test_elicitation_sweep.rs"
+
+[[test]]
+name = "test_scm_escaping"
+path = "tests/unit/test_scm_escaping.rs"
+
+[[test]]
+name = "test_tools_fixes"
+path = "tests/unit/test_tools_fixes.rs"
+
+[[test]]
+name = "test_retry"
+path = "tests/integration/test_retry.rs"
+
+[[test]]
+name = "test_workspace_config"
+path = "tests/unit/test_workspace_config.rs"
+
+[[test]]
+name = "test_e2e"
+path = "tests/integration/test_e2e.rs"
+
+[[test]]
+name = "test_scm_unit"
+path = "tests/unit/test_scm_unit.rs"
+
+[[test]]
+name = "test_search_unit"
+path = "tests/unit/test_search_unit.rs"
+
+[[test]]
+name = "test_skills_unit"
+path = "tests/unit/test_skills_unit.rs"
+
+[[test]]
+name = "test_info_unit"
+path = "tests/unit/test_info_unit.rs"
+
+[[test]]
+name = "test_generate_unit"
+path = "tests/unit/test_generate_unit.rs"
+
+[[test]]
+name = "test_discovery_unit"
+path = "tests/unit/test_discovery_unit.rs"
+
+[[test]]
+name = "test_toolset"
+path = "tests/unit/test_toolset.rs"
+
+[[test]]
+name = "symbols_local_tests"
+path = "tests/symbols_local_tests.rs"
+
+[[test]]
+name = "admin_unit_tests"
+path = "tests/admin_unit_tests.rs"
+
+[[test]]
+name = "admin_e2e_tests"
+path = "tests/admin_e2e_tests.rs"
+
+[[test]]
+name = "log_store_tests"
+path = "tests/log_store_tests.rs"
+
+[[test]]
+name = "progressive_disclosure_integration"
+path = "tests/progressive_disclosure_integration.rs"
+
+[[test]]
+name = "docker_discovery_e2e"
+path = "tests/docker_discovery_e2e.rs"
+
+[[test]]
+name = "test_iris_test_http"
+path = "tests/unit/test_iris_test_http.rs"
+
+[[test]]
+name = "test_iris_test_e2e"
+path = "tests/integration/test_iris_test_e2e.rs"
+
+[[test]]
+name = "test_sql_safety"
+path = "tests/unit/test_sql_safety.rs"
+
+[[test]]
+name = "test_sql_safety_e2e"
+path = "tests/integration/test_sql_safety_e2e.rs"
+
+[[test]]
+name = "test_live_reload"
+path = "tests/unit/test_live_reload.rs"
+
+[[test]]
+name = "test_live_reload_e2e"
+path = "tests/integration/test_live_reload_e2e.rs"
+
+[[test]]
+name = "test_sql_translate"
+path = "tests/unit/test_sql_translate.rs"
+
+[[test]]
+name = "test_sql_translate_e2e"
+path = "tests/integration/test_sql_translate_e2e.rs"

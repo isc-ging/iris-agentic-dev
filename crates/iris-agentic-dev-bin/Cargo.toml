@@ -1,0 +1,29 @@
+[package]
+name = "iris-agentic-dev"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "iris-agentic-dev"
+path = "src/main.rs"
+
+[dependencies]
+iris-agentic-dev-core = { path = "../iris-agentic-dev-core" }
+rmcp = { workspace = true }
+clap.workspace = true
+which.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+urlencoding = "2"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "plugin_dispatch_tests"
+path = "tests/plugin_dispatch_tests.rs"
