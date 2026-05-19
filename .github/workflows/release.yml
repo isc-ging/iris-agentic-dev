@@ -87,11 +87,11 @@ jobs:
 
             ### macOS / Linux — one-liner
             ```bash
-            curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x86_64/;s/arm64/arm64/;s/aarch64/arm64/') -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
+            curl -fsSL https://github.com/intersystems-community/iris-agentic-dev/releases/latest/download/iris-agentic-dev-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/x86_64/;s/arm64/arm64/;s/aarch64/arm64/') -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
             ```
 
             ### Windows
-            Download [`iris-agentic-dev-windows-x86_64.exe`](https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-windows-x86_64.exe), rename to `iris-agentic-dev.exe`, place on your PATH.
+            Download [`iris-agentic-dev-windows-x86_64.exe`](https://github.com/intersystems-community/iris-agentic-dev/releases/latest/download/iris-agentic-dev-windows-x86_64.exe), rename to `iris-agentic-dev.exe`, place on your PATH.
             Or set `iris-agentic-dev.serverPath` in VS Code settings to the full path — no PATH required.
 
             ### VS Code Extension
@@ -105,7 +105,7 @@ jobs:
             iris-agentic-dev mcp   # start MCP server
             ```
 
-            See the [README](https://github.com/intersystems-community/iris-dev#readme) for full setup instructions.
+            See the [README](https://github.com/intersystems-community/iris-agentic-dev#readme) for full setup instructions.
 
             ### Homebrew (macOS / Linux)
             ```bash
@@ -143,24 +143,24 @@ jobs:
           lines = [
             'class IrisAgenticDev < Formula',
             '  desc "MCP server connecting AI assistants to InterSystems IRIS — compile, test, debug ObjectScript without leaving the chat"',
-            '  homepage "https://github.com/intersystems-community/iris-dev"',
+            '  homepage "https://github.com/intersystems-community/iris-agentic-dev"',
             '  version "' + v + '"',
             '  license "MIT"',
             '',
             '  on_macos do',
             '    on_arm do',
-            '      url "https://github.com/intersystems-community/iris-dev/releases/download/v' + v + '/iris-agentic-dev-macos-arm64"',
+            '      url "https://github.com/intersystems-community/iris-agentic-dev/releases/download/v' + v + '/iris-agentic-dev-macos-arm64"',
             '      sha256 "' + a64 + '"',
             '    end',
             '    on_intel do',
-            '      url "https://github.com/intersystems-community/iris-dev/releases/download/v' + v + '/iris-agentic-dev-macos-x86_64"',
+            '      url "https://github.com/intersystems-community/iris-agentic-dev/releases/download/v' + v + '/iris-agentic-dev-macos-x86_64"',
             '      sha256 "' + x86 + '"',
             '    end',
             '  end',
             '',
             '  on_linux do',
             '    on_intel do',
-            '      url "https://github.com/intersystems-community/iris-dev/releases/download/v' + v + '/iris-agentic-dev-linux-x86_64"',
+            '      url "https://github.com/intersystems-community/iris-agentic-dev/releases/download/v' + v + '/iris-agentic-dev-linux-x86_64"',
             '      sha256 "' + lnx + '"',
             '    end',
             '  end',

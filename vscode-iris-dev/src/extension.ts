@@ -102,7 +102,7 @@ export class IrisDevMcpProvider
     if (!command) {
       vscode.window.showErrorMessage(
         'iris-agentic-dev: binary not found. ' +
-        'Download from https://github.com/intersystems-community/iris-dev/releases ' +
+        'Download from https://github.com/intersystems-community/iris-agentic-dev/releases ' +
         'or set iris-agentic-dev.serverPath in VS Code settings.'
       );
       return [];

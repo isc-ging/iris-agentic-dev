@@ -17,7 +17,7 @@ version = "0.5.0"
 edition = "2021"
 authors = ["Thomas Dyar <thomas.dyar@intersystems.com>"]
 license = "MIT"
-repository = "https://github.com/intersystems-community/iris-dev"
+repository = "https://github.com/intersystems-community/iris-agentic-dev"
 
 [workspace.dependencies]
 # MCP server

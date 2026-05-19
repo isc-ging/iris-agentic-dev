@@ -16,7 +16,7 @@ iris-agentic-dev runs as a local MCP (Model Context Protocol) server. Your AI as
 
 ```bash
 # 1. Install iris-agentic-dev (Mac Apple Silicon)
-curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-macos-arm64 \
+curl -fsSL https://github.com/intersystems-community/iris-agentic-dev/releases/latest/download/iris-agentic-dev-macos-arm64 \
   -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
 xattr -d com.apple.quarantine /usr/local/bin/iris-agentic-dev 2>/dev/null
 
@@ -70,7 +70,7 @@ For HTTPS or a non-root web gateway path:
 ### Option C: VS Code Copilot Agent Mode
 
 1. Install the binary (see [Installation](#installation) below)
-2. Download `vscode-iris-agentic-dev-*.vsix` from the [releases page](https://github.com/intersystems-community/iris-dev/releases/latest)
+2. Download `vscode-iris-agentic-dev-*.vsix` from the [releases page](https://github.com/intersystems-community/iris-agentic-dev/releases/latest)
 3. In VS Code: Extensions (`Ctrl+Shift+X`) → `...` → **Install from VSIX**
 4. Reload VS Code — **iris-agentic-dev (IRIS)** appears automatically in Copilot Chat → Agent mode → tools
 
@@ -85,7 +85,7 @@ The extension reads your existing `objectscript.conn` and `intersystems.servers`
 ```bash
 # Apple Silicon (M1/M2/M3):
 sudo mkdir -p /usr/local/bin
-curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-macos-arm64 \
+curl -fsSL https://github.com/intersystems-community/iris-agentic-dev/releases/latest/download/iris-agentic-dev-macos-arm64 \
   -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
 xattr -d com.apple.quarantine /usr/local/bin/iris-agentic-dev 2>/dev/null
 
@@ -95,13 +95,13 @@ xattr -d com.apple.quarantine /usr/local/bin/iris-agentic-dev 2>/dev/null
 ### Linux
 
 ```bash
-curl -fsSL https://github.com/intersystems-community/iris-dev/releases/latest/download/iris-agentic-dev-linux-x86_64 \
+curl -fsSL https://github.com/intersystems-community/iris-agentic-dev/releases/latest/download/iris-agentic-dev-linux-x86_64 \
   -o /usr/local/bin/iris-agentic-dev && chmod +x /usr/local/bin/iris-agentic-dev
 ```
 
 ### Windows
 
-1. Download `iris-dev-windows-x86_64.exe` from the [releases page](https://github.com/intersystems-community/iris-dev/releases/latest)
+1. Download `iris-dev-windows-x86_64.exe` from the [releases page](https://github.com/intersystems-community/iris-agentic-dev/releases/latest)
 2. Save it somewhere permanent, e.g. `C:\Users\yourname\bin\iris-agentic-dev.exe`
 3. In VS Code User Settings (JSON), set the binary path:
 ```json

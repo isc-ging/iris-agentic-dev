@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/intersystems-community/iris-dev"
+    "url": "https://github.com/intersystems-community/iris-agentic-dev"
   },
   "engines": {
     "vscode": "^1.99.0"

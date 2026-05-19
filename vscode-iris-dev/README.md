@@ -1,11 +1,11 @@
 # iris-dev for VS Code
 
-Wires [iris-dev](https://github.com/intersystems-community/iris-dev) MCP tools into VS Code Copilot agent mode. Automatically picks up your `objectscript.conn` connection so your AI assistant can compile, test, search, and debug ObjectScript without leaving the chat.
+Wires [iris-agentic-dev](https://github.com/intersystems-community/iris-agentic-dev) MCP tools into VS Code Copilot agent mode. Automatically picks up your `objectscript.conn` connection so your AI assistant can compile, test, search, and debug ObjectScript without leaving the chat.
 
 ## Requirements
 
 - VS Code 1.99+
-- The [iris-dev binary](https://github.com/intersystems-community/iris-dev/releases) on PATH (or set `iris-dev.serverPath`)
+- The [iris-dev binary](https://github.com/intersystems-community/iris-agentic-dev/releases) on PATH (or set `iris-dev.serverPath`)
 - The [ObjectScript extension](https://marketplace.visualstudio.com/items?itemName=intersystems-community.vscode-objectscript) with an active connection
 
 ## Settings
@@ -20,5 +20,5 @@ Wires [iris-dev](https://github.com/intersystems-community/iris-dev) MCP tools i
 
 ## Links
 
-- [iris-dev on GitHub](https://github.com/intersystems-community/iris-dev)
-- [Release notes](https://github.com/intersystems-community/iris-dev/releases)
+- [iris-agentic-dev on GitHub](https://github.com/intersystems-community/iris-agentic-dev)
+- [Release notes](https://github.com/intersystems-community/iris-agentic-dev/releases)
