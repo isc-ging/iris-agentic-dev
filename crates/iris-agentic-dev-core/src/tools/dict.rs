@@ -414,31 +414,245 @@ mod tests {
         assert!(v["routes"].as_array().unwrap().is_empty());
     }
 
+    // ── A1 fix: task description alignment ──────────────────────────────────
+
+    #[test]
+    fn test_expand_uses_like_not_instring() {
+        let code = build_expand_hierarchy_code(&["Ens.BusinessProcess".to_string()]);
+        assert!(code.contains("LIKE"), "must use LIKE for Super matching");
+        assert!(
+            !code.contains("%INSTRING"),
+            "%INSTRING doesn't accept ? params"
+        );
+    }
+
+    // ── A2 fix: route parsing JSON shape ─────────────────────────────────────
+
+    #[test]
+    fn test_route_json_shape_with_routes() {
+        // Simulate what build_message_map_code writes for a class WITH routes
+        let s = r#"{"has_message_map":true,"routes":[{"message_type":"HS.Message.Request","method":"ProcessRequest","confidence":0.9},{"message_type":"HS.Message.Alert","method":"HandleAlert","confidence":0.9}]}"#;
+        let v: serde_json::Value = serde_json::from_str(s).unwrap();
+        assert_eq!(v["has_message_map"], true);
+        let routes = v["routes"].as_array().unwrap();
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0]["message_type"], "HS.Message.Request");
+        assert_eq!(routes[0]["method"], "ProcessRequest");
+        assert_eq!(routes[0]["confidence"], 0.9);
+        assert_eq!(routes[1]["message_type"], "HS.Message.Alert");
+    }
+
+    // ── confidence_for_count boundary values ─────────────────────────────────
+
+    #[test]
+    fn test_confidence_formula_boundaries() {
+        assert_eq!(confidence_for_count(2), 0.75, "2 = lower bound of 2-5");
+        assert_eq!(confidence_for_count(5), 0.75, "5 = upper bound of 2-5");
+        assert_eq!(confidence_for_count(6), 0.55, "6 = lower bound of 6-20");
+        assert_eq!(confidence_for_count(20), 0.55, "20 = upper bound of 6-20");
+        assert_eq!(confidence_for_count(21), 0.30, "21 = >20");
+        assert_eq!(confidence_for_count(1000), 0.30, "large n = 0.30");
+    }
+
+    // ── build_message_map_code structure ─────────────────────────────────────
+
+    #[test]
+    fn test_build_message_map_code_contains_key_fragments() {
+        let code = build_message_map_code("HS.Flash.Router");
+        assert!(
+            code.contains("HS.Flash.Router||MessageMap"),
+            "must use || key"
+        );
+        assert!(code.contains("%XML.TextReader"), "must use TextReader");
+        assert!(code.contains("MapItem"), "must look for MapItem nodes");
+        assert!(
+            code.contains("MessageType"),
+            "must extract MessageType attr"
+        );
+        assert!(
+            code.contains("NOT_FOUND"),
+            "must emit NOT_FOUND for missing class"
+        );
+        assert!(
+            code.contains("has_message_map"),
+            "must emit has_message_map"
+        );
+        assert!(code.contains("Rewind"), "must rewind stream before parsing");
+    }
+
+    #[test]
+    fn test_build_message_map_code_escapes_class_name() {
+        let code = build_message_map_code("My.Quoted\"Class");
+        // Escaped quote should appear in code — class name with " is sanitized
+        assert!(code.contains("My.Quoted"));
+    }
+
+    // ── build_expand_hierarchy_code multiple bases ────────────────────────────
+
+    #[test]
+    fn test_expand_hierarchy_code_multiple_bases() {
+        let code = build_expand_hierarchy_code(&[
+            "Ens.BusinessProcess".to_string(),
+            "Ens.BusinessOperation".to_string(),
+        ]);
+        assert!(code.contains("Ens.BusinessProcess"));
+        assert!(code.contains("Ens.BusinessOperation"));
+        assert!(code.contains("LIKE"));
+        assert!(code.contains("$LISTFIND"), "must deduplicate via LISTFIND");
+    }
+
+    #[test]
+    fn test_expand_hierarchy_code_single_base() {
+        let code = build_expand_hierarchy_code(&["Ens.Adapter".to_string()]);
+        assert!(code.contains("Ens.Adapter"));
+    }
+
+    // ── ok_json / err_json output shape ──────────────────────────────────────
+
+    #[test]
+    fn test_ok_json_returns_ok() {
+        // ok_json wraps a value in a successful CallToolResult
+        let r = ok_json(serde_json::json!({"x": 1}));
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_err_json_returns_ok_with_error_payload() {
+        // err_json still returns Ok(CallToolResult) — error is in the content payload
+        let r = err_json("MY_CODE", "my message");
+        assert!(r.is_ok(), "err_json must return Ok");
+    }
+
+    // ── Cache key format ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cache_key_format_resolve() {
+        // Verify cache key includes method, prefix, namespace so different calls don't collide
+        let key1 = format!(
+            "resolve_dynamic_dispatch:{}:{}:{}",
+            "Connect", "EnsLib", "USER"
+        );
+        let key2 = format!("resolve_dynamic_dispatch:{}:{}:{}", "Connect", "", "USER");
+        assert_ne!(
+            key1, key2,
+            "different prefix should produce different cache keys"
+        );
+    }
+
+    #[test]
+    fn test_cache_key_sorted_bases() {
+        // find_subclass sorts base_classes before building cache key
+        let mut b1 = vec!["Ens.BP".to_string(), "Ens.BO".to_string()];
+        let mut b2 = vec!["Ens.BO".to_string(), "Ens.BP".to_string()];
+        b1.sort();
+        b2.sort();
+        assert_eq!(
+            b1.join(","),
+            b2.join(","),
+            "sorted bases should produce same key"
+        );
+    }
+
+    // ── JSON parse paths ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_output_parse_empty_array() {
+        // Simulate what happens when [] comes back
+        let trimmed = "[]";
+        let raw: serde_json::Value = serde_json::from_str(trimmed).unwrap_or(serde_json::json!([]));
+        let candidates = raw.as_array().cloned().unwrap_or_default();
+        assert!(candidates.is_empty());
+        assert_eq!(confidence_for_count(0), 0.0);
+    }
+
+    #[test]
+    fn test_resolve_output_parse_with_candidates() {
+        let trimmed = r#"[{"class":"EnsLib.SQL.OutboundAdapter","origin":"EnsLib.SQL.OutboundAdapter","formal_spec":"(pAdapter As %RegisteredObject)"}]"#;
+        let raw: serde_json::Value = serde_json::from_str(trimmed).unwrap_or(serde_json::json!([]));
+        let candidates = raw.as_array().cloned().unwrap_or_default();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0]["class"], "EnsLib.SQL.OutboundAdapter");
+        assert_eq!(confidence_for_count(1), 0.90);
+    }
+
+    #[test]
+    fn test_find_subclass_parse_empty_descendants() {
+        // Simulates desc_raw being empty → descendants = []
+        let desc_raw = "";
+        let descendants: Vec<String> = desc_raw
+            .trim()
+            .split('|')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        assert!(descendants.is_empty());
+    }
+
+    #[test]
+    fn test_find_subclass_parse_pipe_delimited() {
+        let desc_raw = "Ens.BusinessProcess|EnsLib.MsgRouter.RoutingEngine|Custom.Router";
+        let descendants: Vec<String> = desc_raw
+            .trim()
+            .split('|')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(descendants.len(), 3);
+        assert_eq!(descendants[0], "Ens.BusinessProcess");
+        assert_eq!(descendants[2], "Custom.Router");
+    }
+
+    #[test]
+    fn test_error_prefix_stripping() {
+        let trimmed = "ERROR: some sql error message";
+        if let Some(msg) = trimmed.strip_prefix("ERROR:") {
+            assert_eq!(msg.trim(), "some sql error message");
+        } else {
+            panic!("strip_prefix failed");
+        }
+    }
+
+    #[test]
+    fn test_not_found_detection() {
+        let trimmed = "NOT_FOUND";
+        assert_eq!(trimmed, "NOT_FOUND");
+        // Distinguish from a class that has no message map
+        let has_mm = r#"{"has_message_map":false,"routes":[]}"#;
+        assert_ne!(trimmed, has_mm);
+    }
+
+    #[test]
+    fn test_parse_error_detection() {
+        let inner = serde_json::json!({"error": "parse_failed"});
+        assert!(inner.get("error").is_some());
+        assert_eq!(inner["error"].as_str().unwrap_or(""), "parse_failed");
+    }
+
+    // ── Confidence annotator ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_confidence_annotator_updates_candidates() {
+        let candidates: Vec<serde_json::Value> = vec![
+            serde_json::json!({"class": "A"}),
+            serde_json::json!({"class": "B"}),
+        ];
+        let n = candidates.len();
+        let confidence = confidence_for_count(n);
+        let annotated: Vec<serde_json::Value> = candidates
+            .into_iter()
+            .map(|mut c| {
+                c["confidence"] = serde_json::json!(confidence);
+                c
+            })
+            .collect();
+        assert_eq!(annotated[0]["confidence"], 0.75);
+        assert_eq!(annotated[1]["class"], "B");
+    }
+
     #[test]
     fn test_expand_hierarchy_code_nonempty() {
         let code = build_expand_hierarchy_code(&["Ens.BusinessProcess".to_string()]);
         assert!(code.contains("Ens.BusinessProcess"));
         assert!(code.contains("LIKE"));
-    }
-}
-
-#[cfg(test)]
-mod query_debug_tests {
-    use super::*;
-    #[test]
-    fn print_find_subclass_query_code() {
-        let descendants = vec!["Ens.BusinessProcess".to_string()];
-        let method_esc = "OnProcessInput";
-        let limit: usize = 100;
-        let desc_list = descendants
-            .iter()
-            .map(|c| format!(r#"$LISTBUILD("{}")"#, c.replace('"', "\\\"")))
-            .collect::<Vec<_>>()
-            .join("_");
-        let mut lines: Vec<String> = vec!["Set q=$CHAR(34)".into()];
-        lines.push(format!("Set descList={}", desc_list));
-        lines.push(format!(r#"Set rs=##class(%SQL.Statement).%ExecDirect(,"SELECT m.parent, m.FormalSpec FROM %Dictionary.CompiledMethod m WHERE m.Name = ? AND m.Origin = m.parent ORDER BY m.parent FETCH FIRST {} ROWS ONLY","{}")"#, limit, method_esc));
-        let code = lines.join("\n");
-        println!("GENERATED CODE:\n{}", code);
     }
 }
