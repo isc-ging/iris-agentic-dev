@@ -817,9 +817,18 @@ fn e2e_test_runs_unit_test_and_returns_counts() {
         return;
     }
 
+    // Pre-clean: delete any leftover Test022 classes from prior runs (/nodelete means they persist).
+    // Without this, parallel test execution causes false failures when stale classes are found.
+    for stale in &["Test022E2E.UnitTestSuite.cls", "Test022.PersistCheck.cls"] {
+        call_tool(
+            "iris_doc",
+            serde_json::json!({"mode":"delete","name":stale,"namespace":"USER"}),
+        );
+    }
+
     // Seed a %UnitTest.TestCase with one passing and one failing method
-    let cls_doc = "Test022.UnitTestSuite.cls";
-    let cls_content = r#"Class Test022.UnitTestSuite Extends %UnitTest.TestCase {
+    let cls_doc = "Test022E2E.UnitTestSuite.cls";
+    let cls_content = r#"Class Test022E2E.UnitTestSuite Extends %UnitTest.TestCase {
 
 Method TestAlwaysPasses() {
   Do $$$AssertEquals(1, 1, "one equals one")
@@ -851,7 +860,7 @@ Method TestAlwaysFails() {
     // Pass "Test022" to match all test classes in the Test022 package.
     let result = call_tool(
         "iris_test",
-        serde_json::json!({"pattern": "Test022", "namespace": "USER"}),
+        serde_json::json!({"pattern": "Test022E2E", "namespace": "USER"}),
     );
 
     // iris_test returns success:false when any tests fail — that's expected here
