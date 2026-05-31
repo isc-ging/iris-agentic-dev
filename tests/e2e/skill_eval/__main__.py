@@ -32,7 +32,7 @@ _DEFAULT_MODEL = "amazon-bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 def _make_uncovered_result(skill_name: str) -> SkillResult:
     return SkillResult(
         skill=skill_name,
-        fire_rate=None, isolation_fire_rate=None,
+        fire_rate=None, implicit_fire_rate=None, isolation_fire_rate=None,
         pass_rate_baseline=None, pass_rate_skill=None,
         lift=None, lift_delta=None,
         regression_flag=False, new_skill=False,
@@ -48,6 +48,16 @@ def _run_skill(config, openai_key, model, n_runs, iris_host, iris_web_port, iris
     print(f"  [{config.skill}] measuring fire-rate ({n_runs} runs)...", flush=True)
     fire_rate = measure_fire_rate(config, n_runs=n_runs, openai_api_key=openai_key, model=model)
     print(f"  [{config.skill}] fire_rate={fire_rate:.2f}", flush=True)
+
+    # Implicit fire-rate: prompt doesn't name the skill — tests autonomous triggering
+    implicit_fire_rate = None
+    if config.implicit_fire_rate_prompt:
+        print(f"  [{config.skill}] measuring implicit fire-rate ({n_runs} runs)...", flush=True)
+        implicit_fire_rate = measure_fire_rate(
+            config, n_runs=n_runs, openai_api_key=openai_key, model=model,
+            prompt=config.implicit_fire_rate_prompt,
+        )
+        print(f"  [{config.skill}] implicit_fire_rate={implicit_fire_rate:.2f}", flush=True)
 
     isolation_fire_rate = None
     if config.domain_skill and config.isolation_prompt:
@@ -67,6 +77,7 @@ def _run_skill(config, openai_key, model, n_runs, iris_host, iris_web_port, iris
     return SkillResult(
         skill=config.skill,
         fire_rate=fire_rate,
+        implicit_fire_rate=implicit_fire_rate,
         isolation_fire_rate=isolation_fire_rate,
         pass_rate_baseline=lift_data.get("pass_rate_baseline"),
         pass_rate_skill=lift_data.get("pass_rate_skill"),

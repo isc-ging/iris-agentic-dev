@@ -10,6 +10,8 @@ fire_rate_prompt: |
     }
     Return ""
   }
+implicit_fire_rate_prompt: |
+  Write an ObjectScript ClassMethod SaveItem(pName As %String) As %Status for Bench.Patient that creates a new instance, sets the Name, calls %Save(), and returns the status.
 benchmark_tasks:
   - STATUS-CHECK
 domain_skill: false

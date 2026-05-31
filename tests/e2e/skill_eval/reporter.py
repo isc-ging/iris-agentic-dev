@@ -24,8 +24,8 @@ def print_summary(run: EvalRun) -> None:
     header = f"\nSkill Evaluation Results — {run.timestamp}"
     print(header)
     print("=" * len(header.strip()))
-    print(f"{'Skill':<35} {'Fire%':>6} {'Base':>6} {'Skill':>6} {'Lift':>7} {'Δ':>7}  {'Status'}")
-    print("-" * 80)
+    print(f"{'Skill':<35} {'Fire%':>6} {'Impl%':>6} {'Base':>6} {'Skill':>6} {'Lift':>7} {'Δ':>7}  {'Status'}")
+    print("-" * 88)
 
     def fmt_pct(v):
         return f"{v*100:.0f}%" if v is not None else "  n/a"
@@ -43,8 +43,9 @@ def print_summary(run: EvalRun) -> None:
         elif r.regression_flag:
             status = "✗ REGRESSION"
         delta = fmt_lift(r.lift_delta) if r.lift_delta is not None else "   n/a"
+        impl = fmt_pct(getattr(r, "implicit_fire_rate", None))
         print(
-            f"{r.skill:<35} {fmt_pct(r.fire_rate):>6} {fmt_pct(r.pass_rate_baseline):>6} "
+            f"{r.skill:<35} {fmt_pct(r.fire_rate):>6} {impl:>6} {fmt_pct(r.pass_rate_baseline):>6} "
             f"{fmt_pct(r.pass_rate_skill):>6} {fmt_lift(r.lift):>7} {delta:>7}  {status}"
         )
 

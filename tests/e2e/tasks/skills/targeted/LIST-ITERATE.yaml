@@ -1,0 +1,26 @@
+id: LIST-ITERATE
+category: targeted
+description: "Fix the method EvalDemo.ListUtil.FilterNonEmpty — it should return a new %List containing only non-empty strings from the input list, but it crashes on some inputs."
+expected_behavior: "Uses $LISTNEXT for iteration (not For i=1:1:$ListLength which is O(n^2) and crashes on null list). Correctly builds output list using $LISTBUILD or $LIST append. Handles empty input list without error."
+fixtures:
+  - type: cls
+    name: EvalDemo.ListUtil
+    content: |
+      Class EvalDemo.ListUtil Extends %RegisteredObject
+      {
+
+      /// Returns a new %List containing only non-empty strings
+      ClassMethod FilterNonEmpty(pList As %List) As %List
+      {
+          Set result = ""
+          For i=1:1:$ListLength(pList) {
+              Set item = $List(pList, i)
+              If item '= "" {
+                  Set result = result _ $LISTBUILD(item)
+              }
+          }
+          Quit result
+      }
+
+      }
+tags: [list, listbuild, listnext, iteration]

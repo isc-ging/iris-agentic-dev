@@ -11,6 +11,7 @@ def make_result(skill, lift, fire_rate=1.0):
     return SkillResult(
         skill=skill,
         fire_rate=fire_rate,
+        implicit_fire_rate=None,
         isolation_fire_rate=None,
         pass_rate_baseline=0.71,
         pass_rate_skill=0.71 + lift if lift else None,

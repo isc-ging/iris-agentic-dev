@@ -21,6 +21,7 @@ class SkillEvalConfig:
 class SkillResult:
     skill: str
     fire_rate: Optional[float]
+    implicit_fire_rate: Optional[float]  # unprompted trigger rate
     isolation_fire_rate: Optional[float]
     pass_rate_baseline: Optional[float]
     pass_rate_skill: Optional[float]

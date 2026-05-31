@@ -73,16 +73,10 @@ def test_regression_detection():
     """Injecting a fake baseline with higher lift triggers regression_flag."""
     result = SkillResult(
         skill="objectscript-review",
-        fire_rate=1.0,
-        isolation_fire_rate=None,
-        pass_rate_baseline=0.71,
-        pass_rate_skill=0.81,
-        lift=0.10,
-        lift_delta=None,
-        regression_flag=False,
-        new_skill=False,
-        no_task_coverage=False,
-        task_ids_used=["DBG-01"],
+        fire_rate=1.0, implicit_fire_rate=None, isolation_fire_rate=None,
+        pass_rate_baseline=0.71, pass_rate_skill=0.81,
+        lift=0.10, lift_delta=None, regression_flag=False,
+        new_skill=False, no_task_coverage=False, task_ids_used=["DBG-01"],
     )
     baseline = {"objectscript-review": {"lift": 0.99}}
     updated = compare_to_baseline(result, baseline, threshold=0.05)
@@ -95,7 +89,7 @@ def test_no_regression_on_improvement():
     """Higher lift than baseline does not trigger regression_flag."""
     result = SkillResult(
         skill="objectscript-review",
-        fire_rate=1.0, isolation_fire_rate=None,
+        fire_rate=1.0, implicit_fire_rate=None, isolation_fire_rate=None,
         pass_rate_baseline=0.71, pass_rate_skill=1.0,
         lift=0.29, lift_delta=None, regression_flag=False,
         new_skill=False, no_task_coverage=False, task_ids_used=["DBG-01"],
@@ -115,7 +109,7 @@ def test_update_baseline_writes_diff(tmp_path):
 
     result = SkillResult(
         skill="objectscript-review",
-        fire_rate=1.0, isolation_fire_rate=None,
+        fire_rate=1.0, implicit_fire_rate=None, isolation_fire_rate=None,
         pass_rate_baseline=0.71, pass_rate_skill=0.81,
         lift=0.10, lift_delta=None, regression_flag=True,
         new_skill=False, no_task_coverage=False, task_ids_used=["DBG-01"],

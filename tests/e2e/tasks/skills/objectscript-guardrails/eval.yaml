@@ -13,8 +13,9 @@ fire_rate_prompt: |
     }
     Return tSC
   }
+implicit_fire_rate_prompt: |
+  Write an ObjectScript method that logs an audit event with a timestamp and saves it to EvalDemo.AuditLog. Show me the complete class.
 benchmark_tasks:
-  - DBG-01
-  - DBG-02
-  - MOD-01
+  - TIMESTAMP-FORMAT
 domain_skill: false
+targeted_tasks_dir: tests/e2e/tasks/skills/targeted
