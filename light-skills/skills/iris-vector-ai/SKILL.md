@@ -47,7 +47,7 @@ tags:
 - [ ] HNSW index: `AS HNSW(Distance='Cosine')` — NOT `USING hnsw (col vector_cosine_ops)`
 - [ ] Distance parameter: `'Cosine'` or `'DotProduct'` only — NOT `'l2'`, `'euclidean'`, `'inner_product'`
 - [ ] Similarity function: `VECTOR_COSINE(a, b)` — NOT `<=>` or `<->` operators
-- [ ] Parameter binding: `TO_VECTOR(?)` — NOT casting with `::vector`
+- [ ] Parameter binding: `TO_VECTOR(?, DOUBLE, 384)` — 3 args: value, type, dimension. NOT casting with `::vector`. The type and dimension MUST match the column definition.
 - [ ] Embedding function: `EMBEDDING('config-name', ?)` — references `%Embedding.Config` table
 - [ ] Embedded Python: `%SYS.Python.Import("module")` — NOT `IRIS.Python.New()`
 
@@ -79,7 +79,7 @@ CREATE INDEX ON t USING hnsw (col) WITH (m=16, ef_construction=64);
 
 ```sql
 -- CORRECT: TOP N nearest neighbors
-SELECT TOP 5 Name, VECTOR_COSINE(Biography, TO_VECTOR(?)) AS score
+SELECT TOP 5 Name, VECTOR_COSINE(Biography, TO_VECTOR(?, DOUBLE, 384)) AS score
 FROM Company.People
 ORDER BY score DESC
 
@@ -97,11 +97,11 @@ SELECT * FROM items ORDER BY embedding <=> '[1,2,3]'::vector LIMIT 5;
 ```sql
 -- From a comma-separated string:
 INSERT INTO Company.People (Name, Biography)
-VALUES ('Alice', TO_VECTOR('[0.1,0.2,...]'))
+VALUES ('Alice', TO_VECTOR('[0.1,0.2,...]', DOUBLE, 384))
 
 -- Python iris.dbapi:
-cur.execute("INSERT INTO People (Name, Biography) VALUES (?,TO_VECTOR(?))",
-            ["Alice", "[0.1,0.2,...]"])   -- pass as string, not list
+cur.execute("INSERT INTO People (Name, Biography) VALUES (?,TO_VECTOR(?,DOUBLE,384))",
+            ["Alice", "0.1,0.2,..."])   -- pass as string without brackets, not list
 ```
 
 ## Version Matrix

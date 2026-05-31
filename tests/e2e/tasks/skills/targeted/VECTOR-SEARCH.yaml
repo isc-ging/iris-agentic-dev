@@ -1,6 +1,47 @@
 id: VECTOR-SEARCH
 category: targeted
-description: "Write an ObjectScript ClassMethod that performs cosine similarity search on a RAG.Documents table. The table has a VECTOR(DOUBLE, 384) column named 'embedding'. The method should take a query vector string (comma-separated floats) and return the top 5 most similar documents."
-expected_behavior: "Uses TO_VECTOR(?, DOUBLE, 384) to convert the query string (NOT ::vector cast like pgvector). Uses VECTOR_COSINE() for similarity (NOT <=> operator). Uses TOP 5 in the SELECT (not LIMIT). SQL is valid IRIS SQL, not PostgreSQL. The method compiles without error."
-fixtures: []
-tags: [vector, iris-sql, not-pgvector]
+description: "The class EvalDemo.VectorSearch exists with a stub SimilarDocs method. Complete the method: it should query EvalDemo.DocStore (which has a VECTOR(DOUBLE, 3) column named 'embedding') using cosine similarity, returning the top 3 most similar document IDs to a query vector passed as a comma-separated string. Compile the completed class."
+expected_behavior: "Uses VECTOR_COSINE(embedding, TO_VECTOR(?, DOUBLE, 3)) — NOT <=> operator, NOT ::vector cast. Uses TOP 3 in the SELECT (not LIMIT). Passes the query vector string to TO_VECTOR with explicit type DOUBLE and dimension 3. The class compiles without error."
+fixtures:
+  - type: cls
+    name: EvalDemo.DocStore
+    content: |
+      Class EvalDemo.DocStore Extends %Persistent
+      {
+
+      Property DocId As %Integer;
+      Property Content As %String;
+      Property embedding As %Vector(DATATYPE = "DOUBLE", LEN = 3);
+
+      Storage Default
+      {
+      <Data name="DocStoreDefaultData">
+      <Attribute>%%CLASSNAME</Attribute>
+      <Structure>listnode</Structure>
+      <Subscript/>
+      </Data>
+      <DataLocation>^EvalDemo.DocStoreD</DataLocation>
+      <DefaultData>DocStoreDefaultData</DefaultData>
+      <ExtentSize>100000</ExtentSize>
+      <IdLocation>^EvalDemo.DocStoreD</IdLocation>
+      <IndexLocation>^EvalDemo.DocStoreI</IndexLocation>
+      <StreamLocation>^EvalDemo.DocStoreS</StreamLocation>
+      <Type>%Storage.Persistent</Type>
+      }
+
+      }
+  - type: cls
+    name: EvalDemo.VectorSearch
+    content: |
+      Class EvalDemo.VectorSearch Extends %RegisteredObject
+      {
+
+      /// Returns top 3 DocIds most similar to the query vector (comma-separated floats)
+      ClassMethod SimilarDocs(pQueryVec As %String) As %DynamicArray
+      {
+          // TODO: implement cosine similarity search against EvalDemo.DocStore
+          Quit ##class(%DynamicArray).%New()
+      }
+
+      }
+tags: [vector, iris-sql, not-pgvector, cosine-similarity]

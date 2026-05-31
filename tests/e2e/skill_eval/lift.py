@@ -132,6 +132,18 @@ def run_task_and_score(
             )
         events = collect_events(prompt, env.env_vars(), model=model)
 
+    # Check for tool_assertions in task — bypasses LLM judge, scores by tool calls
+    tool_assertions = task_dict.get("tool_assertions", [])
+    if tool_assertions:
+        from tests.e2e.assertions import check_tool_called
+        passed = all(
+            check_tool_called(events, *_parse_assertion_tool(a))
+            for a in tool_assertions
+        )
+        score = 3 if passed else 0
+        reasoning = "tool assertions passed" if passed else f"missing required tools: {tool_assertions}"
+        return {"score": score, "reasoning": reasoning, "task_id": task_id, "condition": skill_name_or_none or "baseline"}
+
     turns = format_transcript(events)
     tool_count = sum(
         1 for e in events
@@ -142,6 +154,14 @@ def run_task_and_score(
     result = {"transcript": turns, "tool_call_count": tool_count, "path": "B"}
     scored = score_result(task_dict, result)
     return {**scored, "task_id": task_id, "condition": skill_name_or_none or "baseline"}
+
+
+def _parse_assertion_tool(assertion: str):
+    """Parse 'server:tool' → (server, tool). 'tool' alone → (None, tool)."""
+    if ":" in assertion:
+        server, _, tool = assertion.partition(":")
+        return server, tool
+    return None, assertion
 
 
 def measure_lift(

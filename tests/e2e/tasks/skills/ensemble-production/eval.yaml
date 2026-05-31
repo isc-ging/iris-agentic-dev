@@ -4,7 +4,8 @@ fire_rate_prompt: |
   Use the ensemble-production skill to help me write ObjectScript code that starts an Interoperability production named MyApp.Production, waits for it to be running, and checks its status.
 implicit_fire_rate_prompt: |
   Our IRIS Interoperability production seems to have stopped processing messages. Walk me through how to diagnose and fix it.
-benchmark_tasks: []
+benchmark_tasks:
+  - ENSEMBLE-DIAGNOSE
 domain_skill: true
 isolation_prompt: |
   Fix this ObjectScript SQL query — the table name is wrong (should use underscore, not dot for the SQL table name):
@@ -14,3 +15,4 @@ isolation_prompt: |
     Set tSQL = "SELECT ID, Name FROM Bench.Patient WHERE Name %STARTSWITH 'A'"
     Set tRS = ##class(%SQL.Statement).%ExecDirect(,tSQL)
   }
+targeted_tasks_dir: tests/e2e/tasks/skills/targeted
