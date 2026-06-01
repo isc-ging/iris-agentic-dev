@@ -3,7 +3,7 @@ description: "IRIS vector search syntax — HNSW index, VECTOR_COSINE, TO_VECTOR
 fire_rate_prompt: |
   Use the iris-vector-ai skill to write an ObjectScript SQL query that performs cosine similarity search on a VECTOR(DOUBLE, 384) column named 'embedding' in a table called RAG.Documents, using TO_VECTOR() to convert a query string, returning the top 10 results sorted by similarity.
 benchmark_tasks:
-  - VECTOR-SEARCH
+  - VECTOR-SYNTAX-COLD
 domain_skill: true
 isolation_prompt: |
   Fix the bug in this ObjectScript method — it uses Return inside a For loop when it should use Quit:
@@ -16,3 +16,6 @@ isolation_prompt: |
     Return ""
   }
 targeted_tasks_dir: tests/e2e/tasks/skills/targeted
+# Cold-start: no fixture, no MCP compiler — tests pure syntax knowledge
+# Scored by pattern matching against expected_behavior, not by compilation
+no_mcp_for_benchmark: true

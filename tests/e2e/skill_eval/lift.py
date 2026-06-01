@@ -189,15 +189,32 @@ def run_task_and_score(
 
 
 def _check_expected_patterns(content: str, expected_behavior: str) -> bool:
-    """Check if key API patterns from expected_behavior appear in the written content."""
+    """Check required patterns present AND forbidden patterns absent in the written content."""
     import re
-    # Extract quoted API names from expected_behavior (e.g., Ens.Director.StartProduction)
+
+    # ── Required patterns: API names in backticks from expected_behavior ──
     api_names = re.findall(r'`([^`]+)`|\b(Ens\.Director\.\w+|##class\([^)]+\)|\$\$\$\w+)\b', expected_behavior)
-    flat = [a for pair in api_names for a in pair if a]
-    if not flat:
-        return True  # no specific patterns to check
-    hits = sum(1 for p in flat if p in content)
-    return hits >= len(flat) // 2  # at least half the patterns present
+    required = [a for pair in api_names for a in pair if a]
+
+    # ── Forbidden patterns: anything after NOT in expected_behavior ──
+    # Extract "NOT X" patterns — these MUST be absent
+    forbidden_raw = re.findall(r'NOT\s+`([^`]+)`|NOT\s+([\w<>=:]+)', expected_behavior)
+    forbidden = [a for pair in forbidden_raw for a in pair if a]
+
+    # Explicit pgvector / wrong-syntax guards for vector tasks
+    if "VECTOR_COSINE" in expected_behavior:
+        forbidden += ["<=>", "<->", "::vector", "LIMIT "]  # LIMIT not TOP is pgvector style
+
+    if required:
+        hits = sum(1 for p in required if p in content)
+        if hits < max(1, len(required) // 2):
+            return False
+
+    for bad in forbidden:
+        if bad in content:
+            return False
+
+    return True
 
 
 def _try_compile_via_atelier(cls_content: str, iris_host: str, iris_web_port: str) -> str:
@@ -269,13 +286,21 @@ def _extract_written_content(events: list[dict]) -> str:
                 best = new_str
     if best:
         return best
-    # Fall back to accumulated text output
+    # Fall back: extract fenced code blocks from text output (objectscript/cls/sql blocks)
+    import re as _re
     texts = [
         e["part"].get("text", "")
         for e in events
         if e.get("type") == "text" and e.get("part", {}).get("time", {}).get("end")
     ]
-    return "\n".join(texts)
+    full_text = "\n".join(texts)
+    # Prefer objectscript/cls code blocks; fall back to any code block
+    for lang in ["objectscript", "cls", "sql", ""]:
+        pattern = rf"```{lang}\n(.*?)```" if lang else r"```\w*\n(.*?)```"
+        blocks = _re.findall(pattern, full_text, _re.DOTALL)
+        if blocks:
+            return max(blocks, key=len)  # return the largest code block
+    return full_text  # last resort: return all text
 
 
 def _parse_assertion_tool(assertion: str):
