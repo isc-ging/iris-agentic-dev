@@ -1,0 +1,10 @@
+skill: objectscript-list-patterns
+description: "ObjectScript %List, %ListOfDataTypes, $LISTBUILD, $LISTTOSTRING, $LISTNEXT patterns."
+fire_rate_prompt: |
+  Use the objectscript-list-patterns skill to write an ObjectScript method that takes a %List of strings, filters out empty strings, and returns a new %List containing only non-empty values.
+implicit_fire_rate_prompt: |
+  Fix the method EvalDemo.ListUtil.FilterNonEmpty — it crashes on some inputs. Show the corrected method.
+benchmark_tasks:
+  - LIST-ITERATE
+domain_skill: false
+targeted_tasks_dir: tests/e2e/tasks/skills/targeted

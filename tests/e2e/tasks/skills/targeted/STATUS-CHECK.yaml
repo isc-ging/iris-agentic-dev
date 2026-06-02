@@ -1,0 +1,36 @@
+id: STATUS-CHECK
+category: targeted
+description: "Add a ClassMethod SaveItem(pName As %String) As %Status to Bench.Patient. The method should: create a new Bench.Patient instance, set Name = pName, call %Save(), and return the status. Use proper IRIS %Status macros to check the result."
+expected_behavior: "Method uses $$$ISERR(sc) or $$$ISOK(sc) to check the %Save() return, NOT 'If sc = 0' or 'If sc'. Uses $$$OK for the success return. Compiles without error."
+fixtures:
+  - type: cls
+    name: Bench.Patient
+    content: |
+      Class Bench.Patient Extends %Persistent
+      {
+
+      Property Name As %String;
+
+      ClassMethod SaveItem(pName As %String) As %Status
+      {
+          // TODO: implement this method
+          Quit $$$OK
+      }
+
+      Storage Default
+      {
+      <Data name="PatientDefaultData">
+      <Attribute>%%CLASSNAME</Attribute>
+      <Structure>listnode</Structure>
+      <Subscript/>
+      </Data>
+      <DataLocation>^Bench.PatientD</DataLocation>
+      <DefaultData>PatientDefaultData</DefaultData>
+      <ExtentSize>100000</ExtentSize>
+      <IdLocation>^Bench.PatientD</IdLocation>
+      <IndexLocation>^Bench.PatientI</IndexLocation>
+      <StreamLocation>^Bench.PatientS</StreamLocation>
+      <Type>%Storage.Persistent</Type>
+      }
+      }
+tags: [status, macros, error-handling]

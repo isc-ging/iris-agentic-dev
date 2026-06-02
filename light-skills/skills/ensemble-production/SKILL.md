@@ -4,11 +4,57 @@ description: Manage and observe IRIS Interoperability productions — lifecycle,
 trigger: When asked about a production status, to start/stop/restart a production, investigate message failures, or check queue backlogs
 ---
 
-## Purpose
-Operate IRIS Interoperability (Ensemble) productions safely: check status before touching
-anything, use targeted tools for each operation type, and always verify after a change.
+## Context Detection
 
-## Process Flow
+**If you have `iris_production` MCP tool available** → use the MCP Process Flow below.
+
+**If writing ObjectScript code** (no MCP tools) → skip to the ObjectScript API section.
+
+## ObjectScript API (no MCP tools)
+
+When writing ObjectScript code to manage productions directly:
+
+### Start / stop / verify
+
+```objectscript
+// Start a production
+Set sc = ##class(Ens.Director).StartProduction("MyApp.Productions.Main")
+If $$$ISERR(sc) { Quit sc }
+
+// Verify it started — GetProductionState returns $$$EnsProductionRunning etc.
+Set state = ##class(Ens.Director).GetProductionState(.sc)
+If state '= $$$EnsProductionRunning {
+    Quit $$$ERROR($$$GeneralError, "Production did not reach running state")
+}
+
+// Graceful stop (timeout seconds, force=0)
+Set sc = ##class(Ens.Director).StopProduction(30, 0)
+
+// Hot-apply config changes — NO DOWNTIME, preferred over restart
+Set sc = ##class(Ens.Director).UpdateProduction()
+```
+
+### Check running state
+
+```objectscript
+// Current production name
+Set prodName = ##class(Ens.Director).GetActiveProductionName()
+
+// State constants: $$$EnsProductionRunning, $$$EnsProductionStopped,
+//                 $$$EnsProductionTroubled, $$$EnsProductionSuspended
+Set state = ##class(Ens.Director).GetProductionState(.sc)
+```
+
+### Key rules for ObjectScript
+
+- **Use `##class(Ens.Director)`** — NOT `$$Start^Ens.Director`, NOT `%Start()` on the class
+- **Use `$$$ISERR(sc)`** to check %Status returns — NOT `If sc = 0` or `If sc`
+- **Use `UpdateProduction()`** for config changes, NOT stop+start (avoids message loss)
+- **Never use force=1** in StopProduction unless graceful timeout has elapsed
+
+---
+
+## MCP Tool Process Flow
 
 ### Investigating a production problem
 

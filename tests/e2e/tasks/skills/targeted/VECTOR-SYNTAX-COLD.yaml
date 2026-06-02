@@ -1,0 +1,6 @@
+id: VECTOR-SYNTAX-COLD
+category: targeted
+description: "Write an ObjectScript ClassMethod FindSimilar(pQueryVec As %String) As %DynamicArray that searches a RAG.Documents table for the 5 most similar documents using cosine similarity. The table has columns: id INTEGER, content VARCHAR, embedding VECTOR(DOUBLE, 384)."
+expected_behavior: "Uses VECTOR_COSINE(embedding, TO_VECTOR(?, DOUBLE, 384)) for similarity — NOT <=> operator, NOT ::vector cast, NOT TO_VECTOR(?) without type and dimension. Uses TOP 5 in SELECT (not LIMIT). Passes query vector as comma-separated string to TO_VECTOR. Never SELECTs the raw embedding column directly — VECTOR columns return as str from the driver and are useless outside SQL functions."
+fixtures: []
+tags: [vector, iris-sql, cold-start, no-compiler]

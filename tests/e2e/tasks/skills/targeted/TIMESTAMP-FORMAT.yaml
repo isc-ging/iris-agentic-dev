@@ -1,0 +1,40 @@
+id: TIMESTAMP-FORMAT
+category: targeted
+description: "Fix the audit logging method in EvalDemo.AuditLog — timestamps aren't storing correctly in the database."
+expected_behavior: "Stores timestamps in 'YYYY-MM-DD HH:MM:SS' format (IRIS %TimeStamp format), not ISO 8601 with a 'T' separator. Uses $ZDATETIME($ZTIMESTAMP,3,0) or equivalent to produce '2026-05-31 14:32:00' rather than '2026-05-31T14:32:00'."
+fixtures:
+  - type: cls
+    name: EvalDemo.AuditLog
+    content: |
+      Class EvalDemo.AuditLog Extends %Persistent
+      {
+
+      Property Event As %String;
+      Property Timestamp As %String;
+
+      ClassMethod LogEvent(pEvent As %String) As %Status
+      {
+          Set obj = ##class(EvalDemo.AuditLog).%New()
+          Set obj.Event = pEvent
+          Set obj.Timestamp = $ZDATETIME($ZTIMESTAMP, 3, 1)
+          Quit obj.%Save()
+      }
+
+      Storage Default
+      {
+      <Data name="AuditLogDefaultData">
+      <Attribute>%%CLASSNAME</Attribute>
+      <Structure>listnode</Structure>
+      <Subscript/>
+      </Data>
+      <DataLocation>^EvalDemo.AuditLogD</DataLocation>
+      <DefaultData>AuditLogDefaultData</DefaultData>
+      <ExtentSize>100000</ExtentSize>
+      <IdLocation>^EvalDemo.AuditLogD</IdLocation>
+      <IndexLocation>^EvalDemo.AuditLogI</IndexLocation>
+      <StreamLocation>^EvalDemo.AuditLogS</StreamLocation>
+      <Type>%Storage.Persistent</Type>
+      }
+
+      }
+tags: [timestamp, format, guardrails]

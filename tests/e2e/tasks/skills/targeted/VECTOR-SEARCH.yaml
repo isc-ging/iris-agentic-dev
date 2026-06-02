@@ -1,0 +1,47 @@
+id: VECTOR-SEARCH
+category: targeted
+description: "The class EvalDemo.VectorSearch exists with a stub SimilarDocs method. Complete the method: it should query EvalDemo.DocStore (which has a VECTOR(DOUBLE, 3) column named 'embedding') using cosine similarity, returning the top 3 most similar document IDs to a query vector passed as a comma-separated string. Compile the completed class."
+expected_behavior: "Uses VECTOR_COSINE(embedding, TO_VECTOR(?, DOUBLE, 3)) — NOT <=> operator, NOT ::vector cast. Uses TOP 3 in the SELECT (not LIMIT). Passes the query vector string to TO_VECTOR with explicit type DOUBLE and dimension 3. The class compiles without error."
+fixtures:
+  - type: cls
+    name: EvalDemo.DocStore
+    content: |
+      Class EvalDemo.DocStore Extends %Persistent
+      {
+
+      Property DocId As %Integer;
+      Property Content As %String;
+      Property embedding As %Vector(DATATYPE = "DOUBLE", LEN = 3);
+
+      Storage Default
+      {
+      <Data name="DocStoreDefaultData">
+      <Attribute>%%CLASSNAME</Attribute>
+      <Structure>listnode</Structure>
+      <Subscript/>
+      </Data>
+      <DataLocation>^EvalDemo.DocStoreD</DataLocation>
+      <DefaultData>DocStoreDefaultData</DefaultData>
+      <ExtentSize>100000</ExtentSize>
+      <IdLocation>^EvalDemo.DocStoreD</IdLocation>
+      <IndexLocation>^EvalDemo.DocStoreI</IndexLocation>
+      <StreamLocation>^EvalDemo.DocStoreS</StreamLocation>
+      <Type>%Storage.Persistent</Type>
+      }
+
+      }
+  - type: cls
+    name: EvalDemo.VectorSearch
+    content: |
+      Class EvalDemo.VectorSearch Extends %RegisteredObject
+      {
+
+      /// Returns top 3 DocIds most similar to the query vector (comma-separated floats)
+      ClassMethod SimilarDocs(pQueryVec As %String) As %DynamicArray
+      {
+          // TODO: implement cosine similarity search against EvalDemo.DocStore
+          Quit ##class(%DynamicArray).%New()
+      }
+
+      }
+tags: [vector, iris-sql, not-pgvector, cosine-similarity]

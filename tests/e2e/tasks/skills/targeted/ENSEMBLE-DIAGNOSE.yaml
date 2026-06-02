@@ -1,0 +1,9 @@
+id: ENSEMBLE-DIAGNOSE
+category: targeted
+description: "Our IRIS Interoperability production MyApp.Production has stopped processing messages. Diagnose why and tell me what you found. Check the production status, then check the queues."
+expected_behavior: "Calls iris_production (to check status) before calling iris_interop_query (to check queues). Does NOT skip straight to logs without checking status first. Uses MCP tools rather than guessing."
+fixtures: []
+# Scored by tool calls, not LLM judge — the skill teaches tool invocation order
+tool_assertions:
+  - "iris_agentic_dev:iris_production"
+tags: [ensemble, production, tool-order]

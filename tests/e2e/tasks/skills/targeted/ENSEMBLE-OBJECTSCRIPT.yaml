@@ -1,0 +1,6 @@
+id: ENSEMBLE-OBJECTSCRIPT
+category: targeted
+description: "Write an ObjectScript ClassMethod StartAndVerify(pProductionClass As %String) As %Status that: (1) starts the named production using the correct Ens.Director API, (2) checks that it is now running, and (3) returns an error status if it failed to start."
+expected_behavior: "Uses ##class(Ens.Director).StartProduction(pProductionClass) to start. Uses ##class(Ens.Director).GetProductionState() or $$$EnsProductionRunning to verify running state. Returns proper %Status using $$$ISERR/$$$OK macros. Does NOT call %Start() directly on the production class, does NOT use Management Portal REST API."
+fixtures: []
+tags: [ensemble, objectscript, ens-director]

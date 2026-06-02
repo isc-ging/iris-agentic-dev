@@ -1,0 +1,21 @@
+skill: ensemble-production
+description: "IRIS Interoperability production lifecycle. Two evaluation modes: (1) with IAD MCP tools — teaches tool invocation order; (2) light-skills only — teaches Ens.Director ObjectScript API."
+fire_rate_prompt: |
+  Use the ensemble-production skill to help me write ObjectScript code that starts an Interoperability production named MyApp.Production, waits for it to be running, and checks its status.
+implicit_fire_rate_prompt: |
+  Our IRIS Interoperability production seems to have stopped processing messages. Walk me through how to diagnose and fix it.
+benchmark_tasks:
+  - ENSEMBLE-OBJECTSCRIPT
+domain_skill: true
+isolation_prompt: |
+  Fix this ObjectScript SQL query — the table name is wrong (should use underscore, not dot for the SQL table name):
+
+  ClassMethod GetPatients() As %DynamicArray
+  {
+    Set tSQL = "SELECT ID, Name FROM Bench.Patient WHERE Name %STARTSWITH 'A'"
+    Set tRS = ##class(%SQL.Statement).%ExecDirect(,tSQL)
+  }
+targeted_tasks_dir: tests/e2e/tasks/skills/targeted
+# Note: ENSEMBLE-OBJECTSCRIPT runs WITHOUT MCP tools (no iris_production available)
+# Tests knowledge of Ens.Director ObjectScript API — the light-skills scenario
+no_mcp_for_benchmark: true
