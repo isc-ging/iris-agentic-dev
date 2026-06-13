@@ -4892,6 +4892,7 @@ mod config_watcher_tests {
 #[cfg(test)]
 mod schema_normalization_tests {
     use super::normalize_schema_openapi3;
+    use super::DOCKER_REQUIRED_HINT;
 
     #[test]
     fn test_normalize_nullable_integer() {
