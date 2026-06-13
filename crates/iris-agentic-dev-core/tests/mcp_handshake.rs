@@ -154,7 +154,7 @@ fn mcp_server_tools_list_returns_23_tools() {
         "iris_compile",
         "iris_test",
         "iris_symbols",
-        "debug_map_int_to_cls",
+        "iris_debug",
         "docs_introspect",
         "skill_list",
         "kb_recall",
