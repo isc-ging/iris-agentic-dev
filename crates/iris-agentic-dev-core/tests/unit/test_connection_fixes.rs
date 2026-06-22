@@ -253,7 +253,9 @@ fn test_build_exec_class_handles_long_code() {
 #[test]
 fn test_build_exec_class_sql_proc_name_uses_underscore() {
     // The generated class IrisDevTmp.IrisDevRunXXX with method Execute [SqlProc]
-    // maps to SQL proc SQLIrisDevTmp.IrisDevRunXXX_Execute (schema prefix, not dot).
+    // maps to SQL proc IrisDevTmp.IrisDevRunXXX_Execute.
+    // For non-User packages, IRIS SQL schema = package name (no "SQL" prefix).
+    // The SQLUser prefix is a historical special case for the User package only.
     // Regression test for #18: was User.IrisDevRunXXX_Execute which caused
     // silent IRIS_COMPILE_FAILED with empty error message.
     let lines = IrisConnection::build_exec_class_for_test(
@@ -268,10 +270,10 @@ fn test_build_exec_class_sql_proc_name_uses_underscore() {
             .any(|l| l.contains("IrisDevTmp.IrisDevRunabc123")),
         "class name should appear in generated source"
     );
-    // SQL proc: IrisDevTmp package maps to SQLIrisDevTmp schema.
+    // SQL proc: IrisDevTmp package -> schema IrisDevTmp (no SQL prefix for non-User packages)
     let id = "abc123";
-    let sql_func = format!("SQLIrisDevTmp.IrisDevRun{}_Execute", id);
-    assert_eq!(sql_func, "SQLIrisDevTmp.IrisDevRunabc123_Execute");
+    let sql_func = format!("IrisDevTmp.IrisDevRun{}_Execute", id);
+    assert_eq!(sql_func, "IrisDevTmp.IrisDevRunabc123_Execute");
     assert!(
         !sql_func.starts_with("User"),
         "SQL proc name must not be in User schema: {}",
@@ -284,7 +286,7 @@ fn test_scratch_package_is_not_user() {
     // Regression test for #60: executor classes must not be generated in User.*
     let id = "testid";
     let class_name = format!("IrisDevTmp.IrisDevRun{}", id);
-    let sql_func = format!("SQLIrisDevTmp.IrisDevRun{}_Execute", id);
+    let sql_func = format!("IrisDevTmp.IrisDevRun{}_Execute", id);
     assert!(
         class_name.starts_with("IrisDevTmp."),
         "class must be in IrisDevTmp package, got: {}",
@@ -295,8 +297,8 @@ fn test_scratch_package_is_not_user() {
         "class must not be in User package"
     );
     assert!(
-        sql_func.starts_with("SQLIrisDevTmp."),
-        "SQL proc must use SQLIrisDevTmp schema, got: {}",
+        sql_func.starts_with("IrisDevTmp."),
+        "SQL proc must use IrisDevTmp schema (non-User packages have no SQL prefix), got: {}",
         sql_func
     );
 }

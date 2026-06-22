@@ -284,8 +284,10 @@ impl IrisConnection {
         // polluting the user's application namespace with transient executor classes.
         let class_name = format!("IrisDevTmp.IrisDevRun{}", id);
         let doc_name = format!("{}.cls", class_name);
-        // SQL proc name: IrisDevTmp package maps to SQLIrisDevTmp schema in IRIS SQL.
-        let sql_func = format!("SQLIrisDevTmp.IrisDevRun{}_Execute", id);
+        // SQL proc name: for non-User packages, IRIS SQL schema = package name (no "SQL" prefix).
+        // IrisDevTmp.IrisDevRunXXX → SQL schema IrisDevTmp, proc IrisDevTmp.IrisDevRunXXX_Execute.
+        // (The SQLUser prefix is a historical special case only for the User package.)
+        let sql_func = format!("IrisDevTmp.IrisDevRun{}_Execute", id);
         let content = Self::build_exec_class(&class_name, code);
 
         // 1. PUT the class document
@@ -362,8 +364,9 @@ impl IrisConnection {
             "".into(),
             "ClassMethod Execute() As %String [ CodeMode = objectgenerator, SqlProc ]".into(),
             "{".into(),
-            // Use a platform-portable temp path (#56): %Library.File.TempFilename works on
-            // both Unix (/tmp/...) and Windows (C:\Windows\Temp\...).
+            // Generator body runs at compile time on the IRIS server.
+            // #56: use %Library.File.TempFilename() for a platform-portable temp path
+            // (Unix /tmp/... and Windows C:\Windows\Temp\...) instead of hardcoded /tmp.
             "  Set tmpfile = ##class(%Library.File).TempFilename(\"txt\")".into(),
             "  Set savedIO = $IO".into(),
             "  Open tmpfile:(\"WNS\"):5".into(),
