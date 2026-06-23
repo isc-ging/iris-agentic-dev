@@ -3862,6 +3862,170 @@ async fn test_dispatch_iris_generate_class_no_llm() {
     );
 }
 
+// ── admin write_disabled paths (IRIS_ADMIN_TOOLS not set) ────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_update_user_write_disabled() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let prev = std::env::var("IRIS_ADMIN_TOOLS").ok();
+    std::env::remove_var("IRIS_ADMIN_TOOLS");
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({
+                "action": "update_user",
+                "username": "some_user",
+                "password": "NewPass123!"
+            }),
+        )
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("IRIS_ADMIN_TOOLS", v);
+    }
+    let v = parse_result(result);
+    assert_eq!(
+        v.get("error_code").and_then(|e| e.as_str()),
+        Some("ADMIN_WRITE_DISABLED"),
+        "expected write-disabled: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_delete_user_write_disabled() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let prev = std::env::var("IRIS_ADMIN_TOOLS").ok();
+    std::env::remove_var("IRIS_ADMIN_TOOLS");
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({
+                "action": "delete_user",
+                "username": "some_user"
+            }),
+        )
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("IRIS_ADMIN_TOOLS", v);
+    }
+    let v = parse_result(result);
+    assert_eq!(
+        v.get("error_code").and_then(|e| e.as_str()),
+        Some("ADMIN_WRITE_DISABLED"),
+        "expected write-disabled: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_create_namespace_write_disabled() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let prev = std::env::var("IRIS_ADMIN_TOOLS").ok();
+    std::env::remove_var("IRIS_ADMIN_TOOLS");
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({
+                "action": "create_namespace",
+                "name": "TESTNS",
+                "code_database": "USER",
+                "data_database": "USER"
+            }),
+        )
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("IRIS_ADMIN_TOOLS", v);
+    }
+    let v = parse_result(result);
+    assert_eq!(
+        v.get("error_code").and_then(|e| e.as_str()),
+        Some("ADMIN_WRITE_DISABLED"),
+        "expected write-disabled: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_create_user_write_disabled_explicit() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let prev = std::env::var("IRIS_ADMIN_TOOLS").ok();
+    std::env::remove_var("IRIS_ADMIN_TOOLS");
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({
+                "action": "create_user",
+                "username": "testuser_disabled",
+                "password": "Test123!"
+            }),
+        )
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("IRIS_ADMIN_TOOLS", v);
+    }
+    let v = parse_result(result);
+    assert_eq!(
+        v.get("error_code").and_then(|e| e.as_str()),
+        Some("ADMIN_WRITE_DISABLED"),
+        "expected write-disabled: {v}"
+    );
+}
+
+// ── info.rs DDL table path ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_table_info_ddl_table() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    // Create a pure DDL table (no corresponding ObjectScript class)
+    let _ = tools
+        .call_for_test(
+            "iris_execute",
+            serde_json::json!({
+                "code": "Do ##class(%SQL.Statement).%ExecDirect(,\"CREATE TABLE SQLUser.IrisDevTmpDDL (Id INTEGER, Name VARCHAR(50))\")",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    // Query table_info — DDL table has no class definition → hits ddl_table branch
+    let result = tools
+        .call_for_test(
+            "iris_table_info",
+            serde_json::json!({
+                "table": "SQLUser.IrisDevTmpDDL",
+                "namespace": "USER",
+                "include_row_count": true
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "iris_table_info ddl: {v}"
+    );
+    // Cleanup
+    let _ = tools
+        .call_for_test(
+            "iris_execute",
+            serde_json::json!({
+                "code": "Do ##class(%SQL.Statement).%ExecDirect(,\"DROP TABLE SQLUser.IrisDevTmpDDL\")",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+}
+
 // ── iris_table_info additional actions ────────────────────────────────────────
 
 #[tokio::test]
@@ -7002,5 +7166,92 @@ async fn test_dispatch_iris_doc_delete_nonexistent_v3() {
     assert!(
         v.get("success").is_some() || v.get("error_code").is_some(),
         "iris_doc delete nonexistent: {v}"
+    );
+}
+
+// ── admin write_disabled: delete_namespace, create_webapp, delete_webapp ─────
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_delete_namespace_write_disabled() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let prev = std::env::var("IRIS_ADMIN_TOOLS").ok();
+    std::env::remove_var("IRIS_ADMIN_TOOLS");
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({
+                "action": "delete_namespace",
+                "name": "FAKENS"
+            }),
+        )
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("IRIS_ADMIN_TOOLS", v);
+    }
+    let v = parse_result(result);
+    assert_eq!(
+        v.get("error_code").and_then(|e| e.as_str()),
+        Some("ADMIN_WRITE_DISABLED"),
+        "expected write-disabled: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_create_webapp_write_disabled() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let prev = std::env::var("IRIS_ADMIN_TOOLS").ok();
+    std::env::remove_var("IRIS_ADMIN_TOOLS");
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({
+                "action": "create_webapp",
+                "path": "/testapp",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("IRIS_ADMIN_TOOLS", v);
+    }
+    let v = parse_result(result);
+    assert_eq!(
+        v.get("error_code").and_then(|e| e.as_str()),
+        Some("ADMIN_WRITE_DISABLED"),
+        "expected write-disabled: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_delete_webapp_write_disabled() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let prev = std::env::var("IRIS_ADMIN_TOOLS").ok();
+    std::env::remove_var("IRIS_ADMIN_TOOLS");
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({
+                "action": "delete_webapp",
+                "path": "/testapp"
+            }),
+        )
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("IRIS_ADMIN_TOOLS", v);
+    }
+    let v = parse_result(result);
+    assert_eq!(
+        v.get("error_code").and_then(|e| e.as_str()),
+        Some("ADMIN_WRITE_DISABLED"),
+        "expected write-disabled: {v}"
     );
 }
