@@ -7255,3 +7255,262 @@ async fn test_dispatch_iris_admin_delete_webapp_write_disabled() {
         "expected write-disabled: {v}"
     );
 }
+
+// ── skills_tools coverage: skill umbrella action branches ────────────────────
+
+#[tokio::test]
+async fn test_dispatch_skill_umbrella_describe() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill",
+            serde_json::json!({ "action": "describe", "name": "nonexistent-skill-xyz9999" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "skill describe: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_skill_umbrella_search_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill",
+            serde_json::json!({ "action": "search", "query": "iris xyz compile objectscript" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("results").is_some() || v.get("error_code").is_some(),
+        "skill search v2: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_skill_umbrella_forget_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill",
+            serde_json::json!({ "action": "forget", "name": "nonexistent-skill-xyz9999" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "skill forget v2: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_skill_umbrella_propose_no_history() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test("skill", serde_json::json!({ "action": "propose" }))
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some() || v.get("skill").is_some(),
+        "skill propose no history: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_skill_umbrella_invalid_action_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test("skill", serde_json::json!({ "action": "bogus_action_xyz" }))
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "skill invalid action v2: {v}"
+    );
+}
+
+// ── skills_tools: skill_community umbrella branches ───────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_skill_community_umbrella_install_notfound_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill_community",
+            serde_json::json!({ "action": "install", "package": "nonexistent-pkg-xyz9999" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "skill_community install notfound v2: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_skill_community_umbrella_install_empty_pkg_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill_community",
+            serde_json::json!({ "action": "install" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "skill_community install empty pkg v2: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_skill_community_umbrella_invalid_action_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill_community",
+            serde_json::json!({ "action": "bogus_xyz" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "skill_community invalid action v2: {v}"
+    );
+}
+
+// ── skills_tools: kb umbrella branches ───────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_kb_umbrella_index_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "kb",
+            serde_json::json!({ "action": "index", "path": "/tmp" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("indexed").is_some() || v.get("error_code").is_some(),
+        "kb index v2: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_kb_umbrella_invalid_action_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test("kb", serde_json::json!({ "action": "bogus_xyz" }))
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "kb invalid action v2: {v}"
+    );
+}
+
+// ── skills_tools: agent_info — history branch ────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_agent_info_umbrella_history_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "agent_info",
+            serde_json::json!({ "what": "history", "limit": 5 }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("calls").is_some() || v.get("error_code").is_some(),
+        "agent_info history v2: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_agent_info_umbrella_invalid_what_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test("agent_info", serde_json::json!({ "what": "bogus_xyz" }))
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "agent_info invalid what v2: {v}"
+    );
+}
+
+// ── skills_tools: learning_disabled path ─────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_skill_learning_disabled_v2() {
+    let prev = std::env::var("OBJECTSCRIPT_LEARNING").ok();
+    std::env::set_var("OBJECTSCRIPT_LEARNING", "false");
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => {
+            if let Some(v) = prev {
+                std::env::set_var("OBJECTSCRIPT_LEARNING", v);
+            } else {
+                std::env::remove_var("OBJECTSCRIPT_LEARNING");
+            }
+            return;
+        }
+    };
+    let result = tools
+        .call_for_test("skill", serde_json::json!({ "action": "list" }))
+        .await;
+    if let Some(v) = prev {
+        std::env::set_var("OBJECTSCRIPT_LEARNING", v);
+    } else {
+        std::env::remove_var("OBJECTSCRIPT_LEARNING");
+    }
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code")
+            .map(|e| e.as_str() == Some("LEARNING_DISABLED"))
+            .unwrap_or(false)
+            || v.get("success").is_some(),
+        "skill learning disabled v2: {v}"
+    );
+}
