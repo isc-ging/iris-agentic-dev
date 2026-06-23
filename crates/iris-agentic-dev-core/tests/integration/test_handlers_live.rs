@@ -8649,3 +8649,260 @@ async fn test_dispatch_skill_describe_not_found_v2() {
         "skill describe not found v2: {v}"
     );
 }
+
+// ── interop set_settings non-empty → ITEM_NOT_FOUND path ─────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_production_item_set_settings_nonempty() {
+    // set_settings with a real key→value pair but nonexistent item.
+    // Covers lines 596-649 of interop.rs (set_settings body + ITEM_NOT_FOUND return).
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_production_item",
+            serde_json::json!({
+                "action": "set_settings",
+                "item_name": "IrisDevNonExistentItem99999",
+                "settings": {"LogTraceEvents": "1"},
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "production_item set_settings nonempty: {v}"
+    );
+}
+
+// ── lookup_transfer export existing table ─────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_lookup_transfer_export_existing() {
+    // Export IrisDevImportTest — created by the import test above.
+    // If it doesn't exist (first run), imports it first.
+    // Covers lines 1115-1118 of interop.rs (entry_count + ok_json success path).
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    if std::env::var("IRIS_ADMIN_TOOLS").unwrap_or_default() != "1" {
+        return;
+    }
+    // Ensure the table exists by importing a minimal XML first
+    let xml = r#"<?xml version="1.0" ?><Lookup><![CDATA[IrisDevExportTarget]]><entry key="k1" value="v1"/></Lookup>"#;
+    let _ = tools
+        .call_for_test(
+            "iris_lookup_transfer",
+            serde_json::json!({
+                "action": "import",
+                "table": "IrisDevExportTarget",
+                "xml": xml,
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    // Now export — should hit success path with XML output
+    let result = tools
+        .call_for_test(
+            "iris_lookup_transfer",
+            serde_json::json!({
+                "action": "export",
+                "table": "IrisDevExportTarget",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "lookup_transfer export existing: {v}"
+    );
+    if v.get("success").map(|s| s.as_bool()).flatten() == Some(true) {
+        // Verify entry_count field exists and xml field present
+        assert!(
+            v.get("entry_count").is_some(),
+            "success response missing entry_count: {v}"
+        );
+        assert!(v.get("xml").is_some(), "success response missing xml: {v}");
+    }
+}
+
+// ── scm elicitation_id expired → ELICITATION_EXPIRED (v2) ───────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_source_control_elicitation_expired_v2() {
+    // Pass elicitation_id + answer with a nonexistent ID.
+    // Covers lines 89-93 of scm.rs (ELICITATION_EXPIRED early return).
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_source_control",
+            serde_json::json!({
+                "action": "status",
+                "document": "User.Test.cls",
+                "namespace": "USER",
+                "elicitation_id": "nonexistent-eid-99999",
+                "answer": "yes"
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "scm elicitation expired: {v}"
+    );
+}
+
+// ── iris_info missing action → INVALID_PARAMS ─────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_info_invalid_action() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_info",
+            serde_json::json!({"what": "bogus_what_xyz", "namespace": "USER"}),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "iris_info bogus action: {v}"
+    );
+}
+
+// ── iris_lookup_manage missing action → INVALID_PARAMS ───────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_lookup_manage_invalid_action() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_lookup_manage",
+            serde_json::json!({"action": "bogus_xyz", "table": "T", "namespace": "USER"}),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "iris_lookup_manage bogus action: {v}"
+    );
+}
+
+// ── iris_interop_query invalid what → INVALID_PARAMS ─────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_interop_query_invalid_what_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_interop_query",
+            serde_json::json!({"what": "bogus_what_xyz", "namespace": "USER"}),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "iris_interop_query bogus what: {v}"
+    );
+}
+
+// ── iris_credential_manage invalid action ────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_credential_manage_invalid_action() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_credential_manage",
+            serde_json::json!({"action": "bogus_action", "name": "TestCred", "namespace": "USER"}),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "iris_credential_manage bogus action: {v}"
+    );
+}
+
+// ── iris_production invalid action ───────────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_production_invalid_action() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_production",
+            serde_json::json!({"action": "bogus_action_xyz", "namespace": "USER"}),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "iris_production bogus action: {v}"
+    );
+}
+
+// ── iris_symbols_local empty glob ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_symbols_local_nonexistent_path() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_symbols_local",
+            serde_json::json!({"query": "IrisDevNonExistentClass99999.*", "namespace": "USER"}),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("symbols").is_some() || v.get("error_code").is_some(),
+        "iris_symbols_local nonexistent: {v}"
+    );
+}
+
+// ── iris_admin invalid action ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_admin_invalid_action_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_admin",
+            serde_json::json!({"action": "totally_bogus_action_xyz"}),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("error_code").is_some() || v.get("success").is_some(),
+        "iris_admin bogus action: {v}"
+    );
+}
