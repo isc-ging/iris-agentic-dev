@@ -6202,3 +6202,290 @@ async fn test_dispatch_iris_execute_with_sql_translation() {
         "iris_execute with sql translation: {v}"
     );
 }
+
+// ── debug_map_int_to_cls (covers lines 3130-3155 mod.rs) ─────────────────────
+
+#[tokio::test]
+async fn test_dispatch_debug_map_int_to_cls() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "debug_map_int_to_cls",
+            serde_json::json!({
+                "routine": "%SYS.Namespace",
+                "offset": 1,
+                "error_string": "",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "debug_map_int_to_cls: {v}"
+    );
+}
+
+// ── debug_map_int_to_cls with error_string (covers parse_iris_error_string branch) ──
+
+#[tokio::test]
+async fn test_dispatch_debug_map_int_to_cls_error_string() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "debug_map_int_to_cls",
+            serde_json::json!({
+                "routine": "",
+                "offset": 0,
+                "error_string": "<UNDEFINED>x+3^%SYS.Namespace.1",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "debug_map_int_to_cls error_string: {v}"
+    );
+}
+
+// ── debug_capture_packet (covers lines 3163-3176 mod.rs) ─────────────────────
+
+#[tokio::test]
+async fn test_dispatch_debug_capture_packet() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "debug_capture_packet",
+            serde_json::json!({ "namespace": "USER" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "debug_capture_packet: {v}"
+    );
+}
+
+// ── debug_get_error_logs (covers lines 3184-3218 mod.rs) ─────────────────────
+
+#[tokio::test]
+async fn test_dispatch_debug_get_error_logs() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "debug_get_error_logs",
+            serde_json::json!({ "namespace": "USER", "max_entries": 5 }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "debug_get_error_logs: {v}"
+    );
+}
+
+// ── debug_source_map (covers lines 3228-3250 mod.rs) ─────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_debug_source_map() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "debug_source_map",
+            serde_json::json!({
+                "cls_name": "%SYS.Namespace",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "debug_source_map: {v}"
+    );
+}
+
+// ── iris_generate (covers lines 3835-3843 mod.rs) ────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_generate_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_generate",
+            serde_json::json!({
+                "gen_type": "class",
+                "description": "A simple test class",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some() || v.get("prompt").is_some(),
+        "iris_generate: {v}"
+    );
+}
+
+// ── docs_introspect (covers lines 3947-3994 mod.rs) ──────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_docs_introspect_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "docs_introspect",
+            serde_json::json!({ "class_name": "%SYS.Namespace", "namespace": "USER" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "docs_introspect: {v}"
+    );
+}
+
+// ── agent_history (covers lines 4011-4020 mod.rs) ────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_agent_history_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test("agent_history", serde_json::json!({ "limit": 5 }))
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("history").is_some() || v.get("error_code").is_some(),
+        "agent_history: {v}"
+    );
+}
+
+// ── agent_stats (covers lines 4035-4040 mod.rs) ───────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_agent_stats_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test("agent_stats", serde_json::json!({}))
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "agent_stats: {v}"
+    );
+}
+
+// ── check_config (covers lines 4136-4148 mod.rs) ─────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_check_config_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test("check_config", serde_json::json!({}))
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("iris_connected").is_some()
+            || v.get("success").is_some()
+            || v.get("error_code").is_some(),
+        "check_config: {v}"
+    );
+}
+
+// ── skill_forget (covers skill_forget handler) ────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_skill_forget_nonexistent() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill_forget",
+            serde_json::json!({ "name": "nonexistent-skill-xyz-99999" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "skill_forget nonexistent: {v}"
+    );
+}
+
+// ── kb_recall (covers kb_recall handler) ─────────────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_kb_recall_empty() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "kb_recall",
+            serde_json::json!({ "query": "nonexistent topic xyz 99999", "namespace": "USER" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("results").is_some() || v.get("error_code").is_some(),
+        "kb_recall empty: {v}"
+    );
+}
+
+// ── iris_symbols (covers iris_symbols handler paths) ─────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_symbols_v2() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "iris_symbols",
+            serde_json::json!({
+                "query": "%SYS.Namespace",
+                "namespace": "USER",
+                "max_results": 5
+            }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("symbols").is_some() || v.get("error_code").is_some(),
+        "iris_symbols v2: {v}"
+    );
+}

@@ -6122,6 +6122,18 @@ impl IrisTools {
             CommunityPkgParams,
             skill_community_install
         );
+        dispatch!("debug_map_int_to_cls", DebugMapParams, debug_map_int_to_cls);
+        dispatch!(
+            "debug_capture_packet",
+            CapturePacketParams,
+            debug_capture_packet
+        );
+        dispatch!(
+            "debug_get_error_logs",
+            ErrorLogsParams,
+            debug_get_error_logs
+        );
+        dispatch!("debug_source_map", SourceMapParams, debug_source_map);
         dispatch_any!("iris_containers", iris_containers);
         Err(format!("unknown tool: {tool}"))
     }
