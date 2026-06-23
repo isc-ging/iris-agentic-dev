@@ -234,12 +234,15 @@ async fn handle_put(
         _ => raw_content,
     };
 
-    // SCM OnBeforeSave — check if write is allowed (requires docker exec; skipped if unavailable)
+    // SCM pre-write check — uses SourceControlCreate for a proper session (HTTP-compatible).
+    // %GetImplementationObject does not exist on any IRIS version; use Interface API instead.
+    let n = name.replace('"', "\"\""); // ObjectScript double-quote escaping
     let scm_check = format!(
-        "set scmObj=##class(%Studio.SourceControl.Base).%GetImplementationObject(\"{n}\") if '$IsObject(scmObj) {{ write \"NO_SCM\" }} else {{ set action=0 set msg=\"\" set target=\"\" set reload=0 set sc=scmObj.UserAction(0,\"%SourceMenu,CheckOut\",\"{n}\",\"\",.action,.target,.msg,.reload) write action_\"|\"_msg }}",
-        n = name.replace('"', "\\\"")
+        "set scmClass=##class(%Studio.SourceControl.Interface).SourceControlClassGet() if scmClass=\"\" {{ write \"NO_SCM\" }} else {{ set sc=##class(%Studio.SourceControl.Interface).SourceControlCreate(\"{u}\",\"{p}\",.c,.f,.o) set obj=$get(%SourceControl) if '$IsObject(obj) {{ write \"NO_SCM\" }} else {{ set action=0 set msg=\"\" set target=\"\" set reload=0 set sc=obj.UserAction(0,\"%SourceMenu,%CheckOut\",\"{n}\",\"\",.action,.target,.msg,.reload) write action_\"|\"_msg }} }}",
+        u = iris.username.replace('"', "\"\""),
+        p = iris.password.replace('"', "\"\""),
     );
-    if let Ok(out) = iris.execute(&scm_check, ns).await {
+    if let Ok(out) = iris.execute_via_generator(&scm_check, ns, client).await {
         let out = out.trim().to_string();
         if out != "NO_SCM" && !out.is_empty() {
             let parts: Vec<&str> = out.splitn(2, '|').collect();

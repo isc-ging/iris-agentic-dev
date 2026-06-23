@@ -149,6 +149,22 @@ jobs:
           # Write class file using printf to avoid YAML/heredoc quoting issues
           docker exec iris-e2e bash -c 'printf "Class IrisDevRunTest.UnitTestSuite Extends %%UnitTest.TestCase {\nMethod TestAlwaysPasses() { Do \$\$\$AssertEquals(1,1) }\nMethod TestAlwaysFails() { Do \$\$\$AssertEquals(1,2) }\n}" > /tmp/httest/IrisDevRunTest/UnitTestSuite.cls'
           echo "Created /tmp/httest/IrisDevRunTest/UnitTestSuite.cls in iris-e2e container"
+      - name: Configure SCM in USER namespace for SCM e2e tests
+        run: |
+          HOST=${{ env.IRIS_HOST }}
+          USER=${{ env.IRIS_USERNAME }}
+          PASS=${{ env.IRIS_PASSWORD }}
+          # Set %Studio.SourceControl.Default as the SCM class for USER namespace.
+          # This is IRIS's built-in no-op SCM stub — it implements the full interface
+          # (IsEditable, UserAction, OnMenuItem, etc.) without any external VCS dependency.
+          # Required so that iris_source_control status tests exercise the controlled code
+          # path (GetStatus returns inSC=1) rather than always returning UNCONTROLLED.
+          curl -s -X POST \
+            -u "$USER:$PASS" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"SET ^%SYS(\"Studio\",\"SourceControl\",\"USER\")=\"%Studio.SourceControl.Default\""}' \
+            "http://$HOST:52773/api/atelier/v1/USER/action/query" | cat
+          echo "SCM configured for USER namespace"
       - name: Run E2E tests against live IRIS (Rust)
         run: cargo test --test test_e2e -- --nocapture
         env:

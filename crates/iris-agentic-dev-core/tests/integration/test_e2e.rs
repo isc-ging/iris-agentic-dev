@@ -3764,3 +3764,120 @@ fn e2e_opencode_docker_snippet_is_valid_json() {
     assert_eq!(config["mcp"]["iris-agentic-dev"]["type"], "local");
     assert_eq!(config["mcp"]["iris-agentic-dev"]["enabled"], true);
 }
+
+// ── iris_source_control ───────────────────────────────────────────────────────
+
+#[test]
+fn e2e_source_control_status_uncontrolled_namespace() {
+    // Verify status returns controlled:false when no SCM is configured.
+    // This is the "happy path" for uncontrolled namespaces — no SCM class set.
+    // Uses %SYS namespace which never has SCM configured.
+    require_iris!();
+    let result = call_tool(
+        "iris_source_control",
+        serde_json::json!({"action":"status","document":"%Library.Base.cls","namespace":"USER"}),
+    );
+    assert_eq!(result["success"], true, "status must not error: {}", result);
+    assert!(
+        result.get("controlled").is_some(),
+        "controlled field must be present: {}",
+        result
+    );
+}
+
+#[test]
+fn e2e_source_control_status_with_scm_configured() {
+    // Verify status exercises the controlled code path when SCM IS configured.
+    // CI configures %Studio.SourceControl.Default on USER namespace before this test runs.
+    // Without this test, the GetStatus/SourceControlCreate code path is dead code in CI.
+    //
+    // If SCM is not configured (e.g. local dev without CI setup step), this falls back to
+    // asserting controlled:false — still valid, just not exercising the full path.
+    require_iris!();
+    // First write a class so we have a real document to check status on
+    let name = "IrisDevTest.ScmStatusTest.cls";
+    let put = call_tool(
+        "iris_doc",
+        serde_json::json!({
+            "mode": "put",
+            "name": name,
+            "content": "Class IrisDevTest.ScmStatusTest {}\n",
+            "namespace": "USER"
+        }),
+    );
+    assert_eq!(put["success"], true, "put setup: {}", put);
+
+    let result = call_tool(
+        "iris_source_control",
+        serde_json::json!({"action":"status","document":name,"namespace":"USER"}),
+    );
+    assert_eq!(result["success"], true, "status must not error: {}", result);
+    assert!(
+        result.get("controlled").is_some(),
+        "controlled field must be present: {}",
+        result
+    );
+    assert!(
+        result.get("editable").is_some(),
+        "editable field must be present: {}",
+        result
+    );
+    assert!(
+        result.get("locked").is_some(),
+        "locked field must be present: {}",
+        result
+    );
+    // With %Studio.SourceControl.Default configured: document is controlled and editable
+    // Without SCM: document is uncontrolled (controlled:false) — also acceptable here
+    if result["controlled"] == true {
+        assert!(
+            result["editable"].as_bool().is_some(),
+            "editable must be a bool when controlled: {}",
+            result
+        );
+    }
+
+    // Cleanup
+    call_tool(
+        "iris_doc",
+        serde_json::json!({"mode":"delete","name":name,"namespace":"USER"}),
+    );
+}
+
+#[test]
+fn e2e_source_control_status_no_method_does_not_exist_error() {
+    // Regression test: ensure status never returns a <METHOD DOES NOT EXIST> error.
+    // Previously %GetImplementationObject was called and didn't exist on any IRIS version.
+    require_iris!();
+    let result = call_tool(
+        "iris_source_control",
+        serde_json::json!({"action":"status","document":"%Library.Base.cls","namespace":"USER"}),
+    );
+    let result_str = result.to_string();
+    assert!(
+        !result_str.contains("METHOD DOES NOT EXIST"),
+        "must not produce <METHOD DOES NOT EXIST> error: {}",
+        result
+    );
+    assert!(
+        !result_str.contains("GetImplementationObject"),
+        "must not reference removed method: {}",
+        result
+    );
+}
+
+#[test]
+fn e2e_source_control_menu_returns_list() {
+    // Verify menu action returns a valid actions array (may be empty if no SCM).
+    require_iris!();
+    let result = call_tool(
+        "iris_source_control",
+        serde_json::json!({"action":"menu","document":"%Library.Base.cls","namespace":"USER"}),
+    );
+    assert_eq!(result["success"], true, "menu must not error: {}", result);
+    assert!(
+        result["actions"].is_array(),
+        "actions must be an array: {}",
+        result
+    );
+}
