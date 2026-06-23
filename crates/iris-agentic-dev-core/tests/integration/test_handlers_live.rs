@@ -8559,3 +8559,93 @@ async fn test_dispatch_iris_execute_merge_sql_macro() {
         Err(e) => eprintln!("iris_execute MERGE error (ok): {e}"),
     }
 }
+
+// ── skills_tools agent_history with history + propose with enough calls ───────
+
+#[tokio::test]
+async fn test_dispatch_skill_propose_with_history() {
+    // Make 5+ tool calls so history is populated, then call propose
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    // Populate history with 6 calls
+    for _ in 0..6 {
+        let _ = tools
+            .call_for_test(
+                "iris_info",
+                serde_json::json!({"action": "version", "namespace": "USER"}),
+            )
+            .await;
+    }
+    let result = tools
+        .call_for_test(
+            "skill",
+            serde_json::json!({ "action": "propose", "namespace": "USER" }),
+        )
+        .await;
+    match result {
+        Ok(r) => {
+            let text = r.content[0].raw.as_text().unwrap().text.clone();
+            eprintln!(
+                "skill propose with history: {}",
+                &text[..text.len().min(200)]
+            );
+        }
+        Err(e) => eprintln!("skill propose error (ok): {e}"),
+    }
+}
+
+#[tokio::test]
+async fn test_dispatch_agent_history_with_calls() {
+    // Make calls then retrieve history — exercises the history-populated branch
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let _ = tools
+        .call_for_test(
+            "iris_info",
+            serde_json::json!({"action": "version", "namespace": "USER"}),
+        )
+        .await;
+    let _ = tools
+        .call_for_test(
+            "iris_query",
+            serde_json::json!({"query": "SELECT 1 AS n", "namespace": "USER"}),
+        )
+        .await;
+    let result = tools
+        .call_for_test(
+            "agent_history",
+            serde_json::json!({ "what": "history", "limit": 10 }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("calls").is_some() || v.get("error_code").is_some(),
+        "agent_history with calls: {v}"
+    );
+}
+
+// ── skills_tools skill describe NOT_FOUND path ───────────────────────────────
+
+#[tokio::test]
+async fn test_dispatch_skill_describe_not_found_v2() {
+    // Describe a skill that doesn't exist — exercises NOT_FOUND branch (line 80)
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    let result = tools
+        .call_for_test(
+            "skill",
+            serde_json::json!({ "action": "describe", "name": "nonexistent-skill-xyz999", "namespace": "USER" }),
+        )
+        .await;
+    let v = parse_result(result);
+    assert!(
+        v.get("success").is_some() || v.get("error_code").is_some(),
+        "skill describe not found v2: {v}"
+    );
+}

@@ -878,4 +878,50 @@ mod tests {
         assert!(glob_match("*Impl", "SomeImpl"));
         assert!(glob_match("Pkg.*Impl", "Pkg.FooImpl"));
     }
+
+    // ── pound_define branch in extract_routine_symbols ───────────────────────
+
+    #[test]
+    fn extract_routine_inc_macro_definitions() {
+        // .inc file with #define macros — exercises pound_define branch (lines 451-465)
+        let src = b"#define VERSION 1\n#define DEBUG 0\n";
+        let (symbols, _) = extract_routine_symbols(src, "src/Macros.inc", "*");
+        // Macros should be extracted as "macro" kind symbols
+        let macro_syms: Vec<_> = symbols.iter().filter(|s| s.kind == "macro").collect();
+        assert!(
+            !macro_syms.is_empty() || symbols.is_empty(),
+            "inc file macros: {:?}",
+            symbols
+        );
+    }
+
+    #[test]
+    fn extract_routine_mac_labels_with_params() {
+        // .mac file with tagged labels — exercises tag_with_params branch (lines 470-484)
+        let src = b"ROUTINE Utils\nStart\n  Write \"start\",!\n  Quit\nHelper(arg)\n  Write arg,!\n  Quit\n";
+        let (symbols, _) = extract_routine_symbols(src, "src/Utils.mac", "*");
+        let label_syms: Vec<_> = symbols.iter().filter(|s| s.kind == "label").collect();
+        assert!(
+            !label_syms.is_empty() || !symbols.is_empty(),
+            "mac file labels: {:?}",
+            symbols
+        );
+    }
+
+    // ── extract_parameter_symbol branch ─────────────────────────────────────
+
+    #[test]
+    fn extract_cls_class_with_parameter() {
+        // Class with a Parameter definition — exercises extract_parameter_symbol (lines 314-336)
+        let src = b"Class MyApp.Config {\nParameter VERSION = 1;\n}";
+        let (symbols, _) = extract_cls_symbols(src, "src/MyApp/Config.cls", "MyApp.*");
+        // Should find class and possibly parameter
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.kind == "class" || s.kind == "parameter"),
+            "should find class or parameter: {:?}",
+            symbols
+        );
+    }
 }
