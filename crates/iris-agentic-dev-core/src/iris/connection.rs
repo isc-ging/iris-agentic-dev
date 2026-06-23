@@ -670,6 +670,24 @@ mod system_mode_tests {
 
     // T005 — SystemMode parsing
     #[test]
+    fn debug_impl_redacts_password() {
+        let c = conn("USER", SystemMode::Unknown);
+        let debug_str = format!("{c:?}");
+        assert!(
+            debug_str.contains("[redacted]"),
+            "password should be redacted: {debug_str}"
+        );
+        assert!(
+            !debug_str.contains("password: \"SYS\""),
+            "raw password should not appear: {debug_str}"
+        );
+        assert!(
+            debug_str.contains("IrisConnection"),
+            "should be an IrisConnection: {debug_str}"
+        );
+    }
+
+    #[test]
     fn system_mode_live_from_string() {
         // Simulates what detect_system_mode maps "Live" to
         assert_eq!(SystemMode::Live, SystemMode::Live);
@@ -722,6 +740,13 @@ mod system_mode_tests {
         assert!(conn("USER", SystemMode::Unknown).is_write_allowed());
         assert!(conn("DEV", SystemMode::Unknown).is_write_allowed());
         assert!(conn("MYAPP", SystemMode::Unknown).is_write_allowed());
+    }
+
+    #[test]
+    fn iris_allow_prod_overrides_live_mode() {
+        std::env::set_var("IRIS_ALLOW_PROD", "1");
+        assert!(conn("USER", SystemMode::Live).is_write_allowed());
+        std::env::remove_var("IRIS_ALLOW_PROD");
     }
 
     #[test]

@@ -304,4 +304,52 @@ mod tests {
         assert_eq!(record.namespace, "LIVE");
         assert!(record.content.is_none());
     }
+
+    #[test]
+    fn test_lookup_expired_returns_none() {
+        let store = ElicitationStore::new();
+        let id = "expired-id-123".to_string();
+        // Insert directly with an already-expired timestamp
+        let entry = PendingElicitation {
+            id: id.clone(),
+            document: "Exp.cls".into(),
+            action: ElicitationAction::Put,
+            content: None,
+            scm_action_id: None,
+            namespace: "USER".into(),
+            expires_at: Instant::now() - Duration::from_secs(1),
+        };
+        store.0.lock().unwrap().insert(id.clone(), entry);
+        // Lookup should return None and remove the entry
+        assert!(store.lookup(&id).is_none());
+        // Entry should be removed from the store
+        assert!(store.0.lock().unwrap().get(&id).is_none());
+    }
+
+    #[test]
+    fn test_sweep_removes_expired_entries() {
+        let store = ElicitationStore::new();
+        // Insert one expired and one fresh entry
+        let expired_id = "expired-sweep-id".to_string();
+        let fresh_id = store.insert("Fresh.cls", ElicitationAction::Put, None, None, "USER");
+        let expired_entry = PendingElicitation {
+            id: expired_id.clone(),
+            document: "Old.cls".into(),
+            action: ElicitationAction::ScmExecute,
+            content: None,
+            scm_action_id: None,
+            namespace: "USER".into(),
+            expires_at: Instant::now() - Duration::from_secs(1),
+        };
+        store
+            .0
+            .lock()
+            .unwrap()
+            .insert(expired_id.clone(), expired_entry);
+        let removed = store.sweep();
+        assert_eq!(removed, 1, "should have removed exactly 1 expired entry");
+        // Expired entry gone, fresh entry still there
+        assert!(store.lookup(&expired_id).is_none());
+        assert!(store.lookup(&fresh_id).is_some());
+    }
 }
