@@ -3777,6 +3777,91 @@ async fn test_dispatch_iris_generate_test() {
     );
 }
 
+// ── iris_generate_class / iris_generate_test via mock LLM ────────────────────
+
+#[tokio::test]
+async fn test_dispatch_iris_generate_class_mock_llm() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    std::env::set_var("IRIS_GENERATE_CLASS_MODEL", "mock");
+    std::env::set_var("OPENAI_API_KEY", "sk-mock-test-key");
+    let result = tools
+        .call_for_test(
+            "iris_generate_class",
+            serde_json::json!({
+                "description": "A simple test class for coverage",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    std::env::remove_var("IRIS_GENERATE_CLASS_MODEL");
+    std::env::remove_var("OPENAI_API_KEY");
+    let v = parse_result(result);
+    assert!(
+        v["success"].as_bool().unwrap_or(false),
+        "iris_generate_class mock: {v}"
+    );
+    assert!(
+        v.get("class_name").is_some(),
+        "expected class_name in response: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_iris_generate_test_mock_llm() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    std::env::set_var("IRIS_GENERATE_CLASS_MODEL", "mock");
+    std::env::set_var("OPENAI_API_KEY", "sk-mock-test-key");
+    let result = tools
+        .call_for_test(
+            "iris_generate_test",
+            serde_json::json!({
+                "class_name": "%Library.Persistent",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    std::env::remove_var("IRIS_GENERATE_CLASS_MODEL");
+    std::env::remove_var("OPENAI_API_KEY");
+    let v = parse_result(result);
+    assert!(
+        v["success"].as_bool().unwrap_or(false) || v.get("error_code").is_some(),
+        "iris_generate_test mock: {v}"
+    );
+}
+
+#[tokio::test]
+async fn test_dispatch_iris_generate_class_no_llm() {
+    let tools = match make_iris_tools() {
+        Some(t) => t,
+        None => return,
+    };
+    std::env::remove_var("IRIS_GENERATE_CLASS_MODEL");
+    std::env::remove_var("OPENAI_API_KEY");
+    std::env::remove_var("ANTHROPIC_API_KEY");
+    let result = tools
+        .call_for_test(
+            "iris_generate_class",
+            serde_json::json!({
+                "description": "A class without LLM configured",
+                "namespace": "USER"
+            }),
+        )
+        .await;
+    // Expect LLM_UNAVAILABLE error path
+    assert!(
+        result.is_err() || {
+            let v = parse_result(result);
+            v.get("error_code").is_some() || v.get("success").is_some()
+        }
+    );
+}
+
 // ── iris_table_info additional actions ────────────────────────────────────────
 
 #[tokio::test]

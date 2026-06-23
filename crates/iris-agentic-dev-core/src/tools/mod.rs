@@ -6142,6 +6142,12 @@ impl IrisTools {
         );
         dispatch!("kb", skills_tools::KbParams, kb);
         dispatch!("agent_info", skills_tools::AgentInfoParams, agent_info);
+        dispatch!(
+            "iris_generate_class",
+            GenerateClassParams,
+            iris_generate_class
+        );
+        dispatch!("iris_generate_test", GenerateTestParams, iris_generate_test);
         dispatch_any!("iris_containers", iris_containers);
         Err(format!("unknown tool: {tool}"))
     }

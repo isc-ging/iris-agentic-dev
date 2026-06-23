@@ -82,6 +82,14 @@ impl LlmClient {
     }
 
     pub async fn complete(&self, system: &str, user: &str) -> Result<String> {
+        #[cfg(any(test, feature = "testing"))]
+        if self.model == "mock" {
+            let _ = (system, user);
+            return Ok(
+                "Class Generated.MockClass Extends %RegisteredObject {\nMethod Hello() As %String { Quit \"hello\" }\n}".to_string(),
+            );
+        }
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(self.timeout_secs))
             .build()?;
