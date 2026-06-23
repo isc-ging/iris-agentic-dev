@@ -218,4 +218,84 @@ mod tests {
         let md = "## Not h1\n# Actual h1";
         assert_eq!(extract_h1_title(md), Some("Actual h1".to_string()));
     }
+
+    #[test]
+    fn test_extract_frontmatter_field_trimmed_whitespace() {
+        let md = "---\nname:   padded-value  \n---";
+        assert_eq!(
+            extract_frontmatter_field(md, "name"),
+            Some("padded-value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_frontmatter_field_second_field() {
+        let md = "---\nname: first\ndescription: second field\n---";
+        assert_eq!(
+            extract_frontmatter_field(md, "description"),
+            Some("second field".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_frontmatter_field_partial_prefix_no_match() {
+        // "names:" should not match "name:"
+        let md = "---\nnames: wrong\n---";
+        assert!(extract_frontmatter_field(md, "name").is_none());
+    }
+
+    #[test]
+    fn test_extract_h1_title_first_h1_wins() {
+        let md = "# First Title\n# Second Title";
+        assert_eq!(extract_h1_title(md), Some("First Title".to_string()));
+    }
+
+    #[test]
+    fn test_extract_h1_title_empty_h1() {
+        let md = "# \nsome content";
+        assert_eq!(extract_h1_title(md), Some(String::new()));
+    }
+
+    #[test]
+    fn test_skill_registry_new_is_empty() {
+        let registry = SkillRegistry::new();
+        assert!(registry.list_skills().is_empty());
+        assert!(registry.list_kb_items().is_empty());
+    }
+
+    #[test]
+    fn test_skill_registry_default_is_empty() {
+        let registry = SkillRegistry::default();
+        assert!(registry.list_skills().is_empty());
+        assert!(registry.list_kb_items().is_empty());
+    }
+
+    #[test]
+    fn test_toml_manifest_deserialize_full() {
+        let toml_str = r#"
+[provides]
+skills = ["skills/foo", "skills/bar"]
+kb_items = ["kb/item1.md"]
+"#;
+        let manifest: TomlManifest = toml::from_str(toml_str).unwrap();
+        let provides = manifest.provides.unwrap();
+        assert_eq!(provides.skills, vec!["skills/foo", "skills/bar"]);
+        assert_eq!(provides.kb_items, vec!["kb/item1.md"]);
+    }
+
+    #[test]
+    fn test_toml_manifest_deserialize_empty_provides() {
+        let toml_str = "[provides]\n";
+        let manifest: TomlManifest = toml::from_str(toml_str).unwrap();
+        let provides = manifest.provides.unwrap();
+        assert!(provides.skills.is_empty());
+        assert!(provides.kb_items.is_empty());
+    }
+
+    #[test]
+    fn test_toml_manifest_deserialize_no_provides() {
+        let toml_str = "# no provides section\n";
+        let manifest: TomlManifest = toml::from_str(toml_str).unwrap();
+        assert!(manifest.provides.is_none());
+    }
 }

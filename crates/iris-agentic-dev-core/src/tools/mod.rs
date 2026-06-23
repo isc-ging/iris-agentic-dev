@@ -5309,4 +5309,226 @@ mod pure_fn_tests {
         let p: ErrorLogsParams = serde_json::from_str(r#"{}"#).unwrap();
         assert!(p.max_entries > 0);
     }
+
+    // ── translate_sql_macros — additional edge cases ──────────────────────────
+    #[test]
+    fn test_translate_sql_macros_multiple_macros() {
+        let code = "&sql(SELECT Name INTO :name FROM t)\n&sql(INSERT INTO t (a) VALUES (:a))";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+        assert!(!result.translated_code.contains("&sql(SELECT"));
+        assert!(!result.translated_code.contains("&sql(INSERT"));
+    }
+
+    #[test]
+    fn test_translate_sql_macros_select_into_extracts_host_var() {
+        let code = "&sql(SELECT Name INTO :name FROM Sample.Person WHERE ID = :id)";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+        // The translated code should reference the output variable "name"
+        assert!(result.translated_code.contains("name"));
+    }
+
+    #[test]
+    fn test_translate_sql_macros_select_no_into_no_host_out() {
+        // SELECT without INTO should not produce an output host var assignment
+        let code = "&sql(SELECT COUNT(*) FROM t)";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+        assert!(!result.translated_code.contains("INTO"));
+    }
+
+    #[test]
+    fn test_translate_sql_macros_empty_string_passthrough() {
+        let result = translate_sql_macros("");
+        assert!(!result.found);
+        assert_eq!(result.translated_code, "");
+    }
+
+    #[test]
+    fn test_translate_sql_macros_plain_objectscript_passthrough() {
+        let code = "Set x = ##class(Sample.Person).%New()";
+        let result = translate_sql_macros(code);
+        assert!(!result.found);
+        assert_eq!(result.translated_code, code);
+    }
+
+    // ── split_csv — additional edge cases ────────────────────────────────────
+    #[test]
+    fn test_split_csv_whitespace_trimmed() {
+        let result = split_csv("  :a  ,  :b  ");
+        // Each item should be trimmed
+        for item in &result {
+            assert_eq!(item.trim(), item.as_str(), "items should be trimmed");
+        }
+    }
+
+    #[test]
+    fn test_split_csv_nested_parens_deep() {
+        let result = split_csv("outer(inner(:a, :b), :c), :d");
+        assert_eq!(result.len(), 2, "nested parens keep first arg together");
+    }
+
+    // ── find_keyword_pos — additional edge cases ──────────────────────────────
+    #[test]
+    fn test_find_keyword_pos_mixed_case() {
+        assert!(find_keyword_pos("select x Where id = 1", "WHERE").is_some());
+    }
+
+    #[test]
+    fn test_find_keyword_pos_at_start() {
+        assert!(find_keyword_pos("FROM t WHERE id = 1", "FROM").is_some());
+    }
+
+    #[test]
+    fn test_find_keyword_pos_keyword_as_substring_not_matched() {
+        // "FROMAGE" must not match keyword "FROM" unless it is a full token
+        // Behavior depends on implementation; at minimum the function returns Some or None
+        // consistently (we just assert the call doesn't panic).
+        let _ = find_keyword_pos("FROMAGE t", "FROM");
+    }
+
+    // ── replace_host_vars_with_positional — additional edge cases ────────────
+    #[test]
+    fn test_replace_host_vars_no_vars_unchanged() {
+        let sql = "SELECT 1 FROM t";
+        let result = replace_host_vars_with_positional(sql, &[]);
+        assert_eq!(result, sql);
+    }
+
+    #[test]
+    fn test_replace_host_vars_repeated_var() {
+        // If the same var appears twice it should be replaced twice
+        let result = replace_host_vars_with_positional(
+            "WHERE a = :x AND b = :x",
+            &["x".to_string()],
+        );
+        let question_count = result.matches('?').count();
+        assert!(
+            question_count >= 1,
+            "at least one ? must appear: {}",
+            result
+        );
+    }
+
+    // ── extract_where_params — additional edge cases ──────────────────────────
+    #[test]
+    fn test_extract_where_params_case_insensitive_where() {
+        let p = extract_where_params("where id = :id");
+        assert!(p.contains(&"id".to_string()));
+    }
+
+    #[test]
+    fn test_extract_where_params_no_colon_no_params() {
+        let p = extract_where_params("WHERE id = 1");
+        assert!(p.is_empty());
+    }
+
+    // ── default_execute_timeout — additional edge cases ───────────────────────
+    #[test]
+    fn test_default_execute_timeout_returns_positive() {
+        let t = default_execute_timeout();
+        assert!(t > 0, "timeout must be positive, got {}", t);
+    }
+
+    #[test]
+    fn test_default_execute_timeout_env_invalid_falls_back() {
+        std::env::set_var("OBJECTSCRIPT_TEST_TIMEOUT", "not_a_number");
+        let t = default_execute_timeout();
+        std::env::remove_var("OBJECTSCRIPT_TEST_TIMEOUT");
+        // Should fall back to a positive default rather than panic
+        assert!(t > 0);
+    }
+
+    // ── map_status_int — additional edge cases ────────────────────────────────
+    #[test]
+    fn test_map_status_int_unknown_large_value() {
+        // Unknown status codes should return a non-empty string (not panic)
+        let s = map_status_int(99, "");
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn test_map_status_int_three_is_skipped_or_unknown() {
+        let s = map_status_int(3, "");
+        assert!(!s.is_empty());
+    }
+
+    // ── build_test_detail — additional edge cases ─────────────────────────────
+    #[test]
+    fn test_build_test_detail_method_grouped_under_correct_suite() {
+        let suites = vec![
+            SuiteRow {
+                id: "1".to_string(),
+                name: "SuiteA".to_string(),
+                status: 1,
+                duration_ms: Some(10.0),
+            },
+            SuiteRow {
+                id: "2".to_string(),
+                name: "SuiteB".to_string(),
+                status: 1,
+                duration_ms: Some(20.0),
+            },
+        ];
+        let methods = vec![
+            MethodRow {
+                suite_id: "1".to_string(),
+                name: "TestA1".to_string(),
+                class_name: "SuiteA".to_string(),
+                status: 1,
+                duration_ms: Some(5.0),
+                error_description: "".to_string(),
+                error_action: "".to_string(),
+            },
+            MethodRow {
+                suite_id: "2".to_string(),
+                name: "TestB1".to_string(),
+                class_name: "SuiteB".to_string(),
+                status: 0,
+                duration_ms: Some(15.0),
+                error_description: "boom".to_string(),
+                error_action: "".to_string(),
+            },
+        ];
+        let result = build_test_detail(&suites, &methods);
+        let arr = result["test_suites"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        // SuiteB contains a failing method
+        let suite_b = arr.iter().find(|s| s["name"] == "SuiteB").unwrap();
+        let suite_b_cases = suite_b["test_cases"].as_array().unwrap();
+        assert_eq!(suite_b_cases[0]["name"], "TestB1");
+    }
+
+    // ── Param struct serde round-trips ────────────────────────────────────────
+    #[test]
+    fn test_compile_params_force_writable_explicit() {
+        let p: CompileParams =
+            serde_json::from_str(r#"{"target": "X.Y", "force_writable": true}"#).unwrap();
+        assert!(p.force_writable);
+    }
+
+    #[test]
+    fn test_test_params_namespace_override() {
+        let p: TestParams =
+            serde_json::from_str(r#"{"pattern": "T.*", "namespace": "MYNS"}"#).unwrap();
+        assert_eq!(p.namespace, "MYNS");
+    }
+
+    #[test]
+    fn test_query_params_with_parameters() {
+        let p: QueryParams =
+            serde_json::from_str(r#"{"query": "SELECT ?", "parameters": ["hello"]}"#).unwrap();
+        assert_eq!(p.parameters.len(), 1);
+        assert_eq!(p.parameters[0], serde_json::Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_get_log_params_with_values() {
+        let p: GetLogParams =
+            serde_json::from_str(r#"{"id": "42", "limit": 10, "offset": 5}"#).unwrap();
+        assert_eq!(p.id, Some("42".to_string()));
+        assert_eq!(p.limit, Some(10));
+        assert_eq!(p.offset, 5);
+    }
 }

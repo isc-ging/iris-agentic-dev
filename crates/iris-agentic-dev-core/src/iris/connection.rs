@@ -841,3 +841,186 @@ mod pure_fn_tests {
         assert!(has_sentinel, "sentinel Write ! must be present");
     }
 }
+
+#[cfg(test)]
+mod additional_tests {
+    use super::*;
+
+    fn make_conn() -> IrisConnection {
+        IrisConnection::new(
+            "http://localhost:52773",
+            "USER",
+            "_SYSTEM",
+            "SYS",
+            DiscoverySource::EnvVar,
+        )
+    }
+
+    fn make_conn_v8() -> IrisConnection {
+        let mut c = make_conn();
+        c.atelier_version = AtelierVersion::V8;
+        c
+    }
+
+    // ── AtelierVersion::version_str ───────────────────────────────────────────
+
+    #[test]
+    fn atelier_version_str_v1() {
+        assert_eq!(AtelierVersion::V1.version_str(), "v1");
+    }
+
+    #[test]
+    fn atelier_version_str_v2() {
+        assert_eq!(AtelierVersion::V2.version_str(), "v2");
+    }
+
+    #[test]
+    fn atelier_version_str_v8() {
+        assert_eq!(AtelierVersion::V8.version_str(), "v8");
+    }
+
+    // ── atelier_url ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn atelier_url_strips_trailing_slash() {
+        let mut c = make_conn();
+        c.base_url = "http://localhost:52773/".to_string();
+        let url = c.atelier_url("/");
+        assert!(
+            !url.contains("//api"),
+            "double slash must not appear: {url}"
+        );
+        assert!(url.contains("/api/atelier"), "{url}");
+    }
+
+    #[test]
+    fn atelier_url_no_trailing_slash_on_base() {
+        let c = make_conn();
+        let url = c.atelier_url("/");
+        assert_eq!(url, "http://localhost:52773/api/atelier/");
+    }
+
+    // ── versioned_ns_url with V8 ──────────────────────────────────────────────
+
+    #[test]
+    fn versioned_ns_url_uses_v8_when_set() {
+        let c = make_conn_v8();
+        let url = c.versioned_ns_url("USER", "/docnames/CLS");
+        assert!(url.contains("/v8/"), "URL must include v8 segment: {url}");
+    }
+
+    #[test]
+    fn versioned_ns_url_default_is_v1() {
+        let c = make_conn();
+        let url = c.versioned_ns_url("USER", "/docnames/CLS");
+        assert!(url.contains("/v1/"), "URL must include v1 segment: {url}");
+    }
+
+    #[test]
+    fn versioned_ns_url_path_appended_after_namespace() {
+        let c = make_conn();
+        let url = c.versioned_ns_url("USER", "/action/query");
+        // Structure: .../v1/USER/action/query
+        assert!(url.ends_with("/action/query"), "{url}");
+    }
+
+    // ── atelier_url_versioned uses self.namespace ─────────────────────────────
+
+    #[test]
+    fn atelier_url_versioned_uses_self_namespace() {
+        let mut c = make_conn();
+        c.namespace = "MYNS".to_string();
+        let url = c.atelier_url_versioned("/action/query");
+        assert!(url.contains("MYNS"), "self.namespace must appear: {url}");
+    }
+
+    // ── CompileResult::success ────────────────────────────────────────────────
+
+    #[test]
+    fn compile_result_success_when_no_errors() {
+        let r = CompileResult {
+            errors: vec![],
+            console: vec!["Compiled.".into()],
+        };
+        assert!(r.success());
+    }
+
+    #[test]
+    fn compile_result_failure_when_errors_present() {
+        let r = CompileResult {
+            errors: vec!["ERROR line 1".into()],
+            console: vec![],
+        };
+        assert!(!r.success());
+    }
+
+    // ── is_bare_prompt_line ───────────────────────────────────────────────────
+
+    #[test]
+    fn bare_prompt_user_is_stripped() {
+        assert!(is_bare_prompt_line("USER>"));
+    }
+
+    #[test]
+    fn bare_prompt_percent_sys_is_stripped() {
+        assert!(is_bare_prompt_line("%SYS>"));
+    }
+
+    #[test]
+    fn bare_prompt_with_trailing_space_is_stripped() {
+        // is_bare_prompt_line receives trimmed input from strip_iris_banner,
+        // but the function itself also trims_end internally.
+        assert!(is_bare_prompt_line("USER>   "));
+    }
+
+    #[test]
+    fn line_with_content_after_prompt_is_not_bare() {
+        // "USER> 42" should NOT be treated as a bare prompt line
+        assert!(!is_bare_prompt_line("USER> 42"));
+    }
+
+    #[test]
+    fn non_prompt_line_is_not_bare() {
+        assert!(!is_bare_prompt_line("42"));
+        assert!(!is_bare_prompt_line(""));
+        assert!(!is_bare_prompt_line("hello world"));
+    }
+
+    // ── strip_iris_banner — additional edge cases ─────────────────────────────
+
+    #[test]
+    fn strip_iris_banner_removes_copyright_line() {
+        let raw = "Copyright (c) 2024 InterSystems Corporation\n42\n";
+        let stripped = strip_iris_banner(raw);
+        assert!(!stripped.contains("Copyright"), "{stripped:?}");
+        assert_eq!(stripped.trim(), "42");
+    }
+
+    #[test]
+    fn strip_iris_banner_keeps_content_lines_unchanged() {
+        let raw = "USER>\nhello\nworld\nUSER>\n";
+        let stripped = strip_iris_banner(raw);
+        assert_eq!(stripped, "hello\nworld");
+    }
+
+    #[test]
+    fn strip_iris_banner_no_prompts_at_all() {
+        let raw = "line one\nline two\n";
+        let stripped = strip_iris_banner(raw);
+        assert_eq!(stripped, "line one\nline two");
+    }
+
+    #[test]
+    fn strip_iris_banner_all_banner_gives_empty() {
+        let raw = "Copyright (c) 2024 InterSystems Corporation\nAll rights reserved.\nIRIS for UNIX\n";
+        let stripped = strip_iris_banner(raw);
+        assert!(stripped.trim().is_empty(), "all banner → empty: {stripped:?}");
+    }
+
+    #[test]
+    fn strip_iris_banner_trims_leading_and_trailing_blank_lines() {
+        let raw = "USER>\n\nhello\n\nUSER>\n";
+        let stripped = strip_iris_banner(raw);
+        assert_eq!(stripped.trim(), "hello");
+    }
+}

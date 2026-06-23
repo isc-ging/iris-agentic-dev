@@ -682,4 +682,137 @@ mod tests {
         let text = result.content[0].raw.as_text().unwrap().text.clone();
         assert!(text.contains("CONFLICT"), "{text}");
     }
+
+    #[test]
+    fn test_iris_doc_params_head_mode() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"mode": "head", "name": "Foo.cls"}"#).unwrap();
+        assert!(matches!(p.mode, DocMode::Head));
+    }
+
+    #[test]
+    fn test_iris_doc_params_delete_mode() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"mode": "delete", "name": "Foo.cls"}"#).unwrap();
+        assert!(matches!(p.mode, DocMode::Delete));
+    }
+
+    #[test]
+    fn test_iris_doc_params_document_alias_for_name() {
+        // "document" is an alias for "name"
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"document": "MyApp.Patient.cls"}"#).unwrap();
+        assert_eq!(p.name.as_deref(), Some("MyApp.Patient.cls"));
+    }
+
+    #[test]
+    fn test_iris_doc_params_namespace_override() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"name": "Foo.cls", "namespace": "MYNS"}"#).unwrap();
+        assert_eq!(p.namespace, "MYNS");
+    }
+
+    #[test]
+    fn test_iris_doc_params_elicitation_fields() {
+        let p: IrisDocParams = serde_json::from_str(
+            r#"{"mode": "put", "elicitation_id": "abc123", "elicitation_answer": "yes"}"#,
+        )
+        .unwrap();
+        assert_eq!(p.elicitation_id.as_deref(), Some("abc123"));
+        assert_eq!(p.elicitation_answer.as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn test_iris_doc_params_elicitation_fields_absent_by_default() {
+        let p: IrisDocParams = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(p.elicitation_id.is_none());
+        assert!(p.elicitation_answer.is_none());
+    }
+
+    #[test]
+    fn test_http_err_json_400_returns_bad_request() {
+        let result = http_err_json(reqwest::StatusCode::BAD_REQUEST, "").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["error_code"], "BAD_REQUEST");
+        assert_eq!(v["success"], false);
+    }
+
+    #[test]
+    fn test_http_err_json_403_returns_auth_error() {
+        let result = http_err_json(reqwest::StatusCode::FORBIDDEN, "forbidden").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["error_code"], "AUTH_ERROR");
+        assert!(v["error"].as_str().unwrap().contains("forbidden"));
+    }
+
+    #[test]
+    fn test_http_err_json_423_returns_locked() {
+        let result =
+            http_err_json(reqwest::StatusCode::from_u16(423).unwrap(), "file locked").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["error_code"], "LOCKED");
+    }
+
+    #[test]
+    fn test_http_err_json_unknown_status_returns_http_error() {
+        // 418 I'm a teapot — not explicitly mapped
+        let result =
+            http_err_json(reqwest::StatusCode::from_u16(418).unwrap(), "teapot").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["error_code"], "HTTP_ERROR");
+    }
+
+    #[test]
+    fn test_http_err_json_empty_hint_omits_colon() {
+        let result = http_err_json(reqwest::StatusCode::NOT_FOUND, "").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        // When no body hint, message should be "HTTP 404 Not Found" without a colon suffix
+        assert!(!v["error"].as_str().unwrap().contains(": "));
+    }
+
+    #[test]
+    fn test_http_err_json_with_hint_includes_colon() {
+        let result = http_err_json(reqwest::StatusCode::NOT_FOUND, "gone away").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(v["error"].as_str().unwrap().contains(": gone away"));
+    }
+
+    #[test]
+    fn test_strip_storage_blocks_no_storage_returns_unchanged() {
+        let cls = "Class Foo {\nProperty X As %String;\n}";
+        let (stripped, flag) = strip_storage_blocks(cls);
+        assert!(!flag, "no storage block should be flagged false");
+        assert_eq!(stripped, cls);
+    }
+
+    #[test]
+    fn test_strip_storage_blocks_multiple_storage_blocks() {
+        let cls = "Class Foo {\nStorage A {\n<one/>\n}\nStorage B {\n<two/>\n}\n}";
+        let (stripped, flag) = strip_storage_blocks(cls);
+        assert!(flag);
+        assert!(!stripped.contains("Storage A"));
+        assert!(!stripped.contains("Storage B"));
+        assert!(stripped.contains("Class Foo"));
+    }
+
+    #[test]
+    fn test_doc_content_to_string_skips_non_string_elements() {
+        // Non-string array elements should be skipped (filter_map with as_str)
+        let body = serde_json::json!({
+            "result": {
+                "content": ["line one", 42, null, "line two"]
+            }
+        });
+        let s = doc_content_to_string(&body);
+        assert!(s.contains("line one"));
+        assert!(s.contains("line two"));
+        // 42 and null have no string representation — they are filtered out
+        assert!(!s.contains("42"));
+    }
 }

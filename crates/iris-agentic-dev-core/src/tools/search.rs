@@ -273,4 +273,93 @@ mod tests {
         let r: Result<SearchParams, _> = serde_json::from_str(r#"{}"#);
         assert!(r.is_err(), "query is required");
     }
+
+    #[test]
+    fn test_search_params_case_sensitive_flag() {
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "Foo", "case_sensitive": true}"#).unwrap();
+        assert!(p.case_sensitive);
+    }
+
+    #[test]
+    fn test_search_params_inline_flag() {
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "x", "inline": true}"#).unwrap();
+        assert!(p.inline);
+    }
+
+    #[test]
+    fn test_search_params_inline_default_false() {
+        let p: SearchParams = serde_json::from_str(r#"{"query": "x"}"#).unwrap();
+        assert!(!p.inline);
+    }
+
+    #[test]
+    fn test_search_params_category_none_by_default() {
+        let p: SearchParams = serde_json::from_str(r#"{"query": "x"}"#).unwrap();
+        assert!(p.category.is_none());
+    }
+
+    #[test]
+    fn test_search_params_category_all_variants() {
+        for cat in &["CLS", "MAC", "INT", "INC", "ALL"] {
+            let json = format!(r#"{{"query": "x", "category": "{}"}}"#, cat);
+            let p: SearchParams = serde_json::from_str(&json).unwrap();
+            assert_eq!(p.category.as_deref(), Some(*cat));
+        }
+    }
+
+    #[test]
+    fn test_search_params_documents_empty_by_default() {
+        let p: SearchParams = serde_json::from_str(r#"{"query": "x"}"#).unwrap();
+        assert!(p.documents.is_empty());
+    }
+
+    #[test]
+    fn test_search_params_documents_single_entry() {
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "x", "documents": ["Ens.Production.cls"]}"#)
+                .unwrap();
+        assert_eq!(p.documents, vec!["Ens.Production.cls"]);
+    }
+
+    #[test]
+    fn test_search_params_all_fields_set() {
+        let json = r#"{
+            "query": "FindMe",
+            "regex": true,
+            "case_sensitive": true,
+            "category": "MAC",
+            "documents": ["App.*.cls"],
+            "namespace": "PROD",
+            "inline": true
+        }"#;
+        let p: SearchParams = serde_json::from_str(json).unwrap();
+        assert_eq!(p.query, "FindMe");
+        assert!(p.regex);
+        assert!(p.case_sensitive);
+        assert_eq!(p.category.as_deref(), Some("MAC"));
+        assert_eq!(p.documents, vec!["App.*.cls"]);
+        assert_eq!(p.namespace, "PROD");
+        assert!(p.inline);
+    }
+
+    #[test]
+    fn test_search_params_empty_query_string_allowed() {
+        // An empty string is technically valid JSON for the query field
+        let p: SearchParams = serde_json::from_str(r#"{"query": ""}"#).unwrap();
+        assert_eq!(p.query, "");
+    }
+
+    #[test]
+    fn test_search_params_regex_default_false() {
+        let p: SearchParams = serde_json::from_str(r#"{"query": "x"}"#).unwrap();
+        assert!(!p.regex);
+    }
+
+    #[test]
+    fn test_search_params_case_sensitive_default_false() {
+        let p: SearchParams = serde_json::from_str(r#"{"query": "x"}"#).unwrap();
+        assert!(!p.case_sensitive);
+    }
 }

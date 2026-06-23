@@ -469,4 +469,118 @@ mod tests {
             serde_json::from_str(r#"{"what": "history", "limit": 50}"#).unwrap();
         assert_eq!(p.limit, 50);
     }
+
+    // ── additional serde tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_skill_params_all_fields() {
+        let p: SkillParams = serde_json::from_str(
+            r#"{"action": "search", "name": "my-skill", "query": "compile"}"#,
+        )
+        .unwrap();
+        assert_eq!(p.action, "search");
+        assert_eq!(p.name.as_deref(), Some("my-skill"));
+        assert_eq!(p.query.as_deref(), Some("compile"));
+    }
+
+    #[test]
+    fn test_skill_params_forget_action() {
+        let p: SkillParams =
+            serde_json::from_str(r#"{"action": "forget", "name": "old-skill"}"#).unwrap();
+        assert_eq!(p.action, "forget");
+        assert_eq!(p.name.as_deref(), Some("old-skill"));
+        assert!(p.query.is_none());
+    }
+
+    #[test]
+    fn test_skill_params_propose_action() {
+        let p: SkillParams = serde_json::from_str(r#"{"action": "propose"}"#).unwrap();
+        assert_eq!(p.action, "propose");
+        assert!(p.name.is_none());
+        assert!(p.query.is_none());
+    }
+
+    #[test]
+    fn test_skill_params_name_null_explicit() {
+        let p: SkillParams =
+            serde_json::from_str(r#"{"action": "list", "name": null}"#).unwrap();
+        assert!(p.name.is_none());
+    }
+
+    #[test]
+    fn test_skill_community_params_missing_action_fails() {
+        let r: Result<SkillCommunityParams, _> = serde_json::from_str(r#"{"package": "foo"}"#);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_skill_community_params_package_null_explicit() {
+        let p: SkillCommunityParams =
+            serde_json::from_str(r#"{"action": "list", "package": null}"#).unwrap();
+        assert_eq!(p.action, "list");
+        assert!(p.package.is_none());
+    }
+
+    #[test]
+    fn test_kb_params_index_with_path() {
+        let p: KbParams =
+            serde_json::from_str(r#"{"action": "index", "path": "/workspace/docs"}"#).unwrap();
+        assert_eq!(p.action, "index");
+        assert_eq!(p.path.as_deref(), Some("/workspace/docs"));
+        assert!(p.query.is_none());
+        assert_eq!(p.top_k, 5);
+    }
+
+    #[test]
+    fn test_kb_params_missing_action_fails() {
+        let r: Result<KbParams, _> = serde_json::from_str(r#"{"query": "hello"}"#);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_kb_params_top_k_zero() {
+        let p: KbParams =
+            serde_json::from_str(r#"{"action": "recall", "query": "test", "top_k": 0}"#).unwrap();
+        assert_eq!(p.top_k, 0);
+    }
+
+    #[test]
+    fn test_kb_params_query_null_explicit() {
+        let p: KbParams =
+            serde_json::from_str(r#"{"action": "recall", "query": null}"#).unwrap();
+        assert!(p.query.is_none());
+        assert_eq!(p.top_k, 5);
+    }
+
+    #[test]
+    fn test_agent_info_params_missing_what_fails() {
+        let r: Result<AgentInfoParams, _> = serde_json::from_str(r#"{"limit": 10}"#);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_agent_info_params_limit_one() {
+        let p: AgentInfoParams =
+            serde_json::from_str(r#"{"what": "history", "limit": 1}"#).unwrap();
+        assert_eq!(p.limit, 1);
+    }
+
+    #[test]
+    fn test_skills_namespace_default() {
+        // When env var is absent the function returns "USER".
+        // We cannot unset the env reliably across threads, so we only test
+        // that the return value is a non-empty String.
+        let ns = skills_namespace();
+        assert!(!ns.is_empty());
+    }
+
+    #[test]
+    fn test_default_top_k_value() {
+        assert_eq!(default_top_k(), 5);
+    }
+
+    #[test]
+    fn test_default_limit_value() {
+        assert_eq!(default_limit(), 20);
+    }
 }

@@ -5,15 +5,28 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+use serde::{Deserialize, Serialize};
 
 const EXPIRY: Duration = Duration::from_secs(300); // 5 minutes
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ElicitationAction {
     /// Resume a iris_doc(mode=put) write
     Put,
     /// Resume an iris_source_control execute action
     ScmExecute,
+}
+
+/// Serde-friendly mirror of [`PendingElicitation`] without the non-serializable [`Instant`].
+/// Used for serialization, deserialization, and persistence of elicitation state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PendingElicitationRecord {
+    pub id: String,
+    pub document: String,
+    pub action: ElicitationAction,
+    pub content: Option<String>,
+    pub scm_action_id: Option<String>,
+    pub namespace: String,
 }
 
 #[derive(Debug, Clone)]
@@ -156,5 +169,122 @@ mod tests {
         assert!(matches!(p.action, ElicitationAction::ScmExecute));
         assert_eq!(p.scm_action_id.as_deref(), Some("CheckIn"));
         assert_eq!(p.namespace, "MYNS");
+    }
+
+    // ── Serde tests ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn serde_action_put_roundtrip() {
+        let action = ElicitationAction::Put;
+        let json = serde_json::to_string(&action).expect("serialize Put");
+        let back: ElicitationAction = serde_json::from_str(&json).expect("deserialize Put");
+        assert_eq!(back, ElicitationAction::Put);
+    }
+
+    #[test]
+    fn serde_action_scm_execute_roundtrip() {
+        let action = ElicitationAction::ScmExecute;
+        let json = serde_json::to_string(&action).expect("serialize ScmExecute");
+        let back: ElicitationAction = serde_json::from_str(&json).expect("deserialize ScmExecute");
+        assert_eq!(back, ElicitationAction::ScmExecute);
+    }
+
+    #[test]
+    fn serde_action_put_json_value() {
+        let action = ElicitationAction::Put;
+        let v: serde_json::Value = serde_json::to_value(&action).unwrap();
+        assert_eq!(v, serde_json::Value::String("Put".to_string()));
+    }
+
+    #[test]
+    fn serde_action_scm_execute_json_value() {
+        let action = ElicitationAction::ScmExecute;
+        let v: serde_json::Value = serde_json::to_value(&action).unwrap();
+        assert_eq!(v, serde_json::Value::String("ScmExecute".to_string()));
+    }
+
+    #[test]
+    fn serde_action_unknown_variant_fails() {
+        let result: Result<ElicitationAction, _> =
+            serde_json::from_str("\"UnknownVariant\"");
+        assert!(result.is_err(), "deserializing an unknown variant must fail");
+    }
+
+    #[test]
+    fn serde_record_put_roundtrip() {
+        let record = PendingElicitationRecord {
+            id: "test-id-1".into(),
+            document: "Pkg.Foo.cls".into(),
+            action: ElicitationAction::Put,
+            content: Some("Class Pkg.Foo {}".into()),
+            scm_action_id: None,
+            namespace: "USER".into(),
+        };
+        let json = serde_json::to_string(&record).expect("serialize record");
+        let back: PendingElicitationRecord =
+            serde_json::from_str(&json).expect("deserialize record");
+        assert_eq!(back, record);
+    }
+
+    #[test]
+    fn serde_record_scm_execute_roundtrip() {
+        let record = PendingElicitationRecord {
+            id: "test-id-2".into(),
+            document: "App.Router.cls".into(),
+            action: ElicitationAction::ScmExecute,
+            content: None,
+            scm_action_id: Some("CheckIn".into()),
+            namespace: "PRODUCTION".into(),
+        };
+        let json = serde_json::to_string(&record).expect("serialize scm record");
+        let back: PendingElicitationRecord =
+            serde_json::from_str(&json).expect("deserialize scm record");
+        assert_eq!(back, record);
+        assert_eq!(back.scm_action_id.as_deref(), Some("CheckIn"));
+        assert!(back.content.is_none());
+    }
+
+    #[test]
+    fn serde_record_optional_fields_none() {
+        let record = PendingElicitationRecord {
+            id: "test-id-3".into(),
+            document: "X.cls".into(),
+            action: ElicitationAction::Put,
+            content: None,
+            scm_action_id: None,
+            namespace: "NS".into(),
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let back: PendingElicitationRecord = serde_json::from_str(&json).unwrap();
+        assert!(back.content.is_none());
+        assert!(back.scm_action_id.is_none());
+    }
+
+    #[test]
+    fn serde_record_missing_required_field_fails() {
+        // "namespace" field is intentionally omitted — deserialization must fail.
+        let json = r#"{"id":"x","document":"X.cls","action":"Put","content":null,"scm_action_id":null}"#;
+        let result: Result<PendingElicitationRecord, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "missing required field 'namespace' must fail");
+    }
+
+    #[test]
+    fn serde_record_from_raw_json() {
+        let json = r#"{
+            "id": "abc-123",
+            "document": "My.Doc.cls",
+            "action": "ScmExecute",
+            "content": null,
+            "scm_action_id": "GetLatest",
+            "namespace": "LIVE"
+        }"#;
+        let record: PendingElicitationRecord =
+            serde_json::from_str(json).expect("parse raw JSON");
+        assert_eq!(record.id, "abc-123");
+        assert_eq!(record.document, "My.Doc.cls");
+        assert_eq!(record.action, ElicitationAction::ScmExecute);
+        assert_eq!(record.scm_action_id.as_deref(), Some("GetLatest"));
+        assert_eq!(record.namespace, "LIVE");
+        assert!(record.content.is_none());
     }
 }

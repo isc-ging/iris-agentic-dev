@@ -666,4 +666,101 @@ mod tests {
         // starts_with → 80, iris suffix → 10 = 90
         assert_eq!(score, 90);
     }
+
+    #[test]
+    fn test_score_container_test_suffix_bonus() {
+        let score = score_container_name("myapp-test", "myapp");
+        // starts_with → 80, test suffix → 5 = 85
+        assert_eq!(score, 85);
+    }
+
+    #[test]
+    fn test_score_container_iris_and_test_suffix_not_both() {
+        // A name can only end with one suffix at a time; neither applies to "myapp-iris-test"
+        // because it ends with "_test" after normalization, not "_iris".
+        let score = score_container_name("myapp-iris-test", "myapp");
+        // starts_with → 80, ends_with _test → 5 = 85
+        assert_eq!(score, 85);
+    }
+
+    #[test]
+    fn test_score_container_exact_match_with_test_suffix() {
+        let score = score_container_name("myapp_test", "myapp");
+        // starts_with (after exact check fails because cn != wb) → 80, test suffix → 5 = 85
+        // Wait: cn = "myapp_test", wb = "myapp"; cn != wb, cn.starts_with(wb) = true → 80 + 5 = 85
+        assert_eq!(score, 85);
+    }
+
+    #[test]
+    fn test_score_container_workspace_longer_than_container() {
+        // Workspace "myapp-service" is longer; container "myapp" won't contain the full wb.
+        let score = score_container_name("myapp", "myapp-service");
+        // cn = "myapp", wb = "myapp_service"; cn != wb, not starts_with, not contains → 0
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn test_score_container_empty_container_name() {
+        // Empty container name with non-empty workspace → no match.
+        assert_eq!(score_container_name("", "myapp"), 0);
+    }
+
+    #[test]
+    fn test_score_container_both_empty() {
+        // Empty workspace triggers early return of 0.
+        assert_eq!(score_container_name("", ""), 0);
+    }
+
+    #[test]
+    fn test_score_container_single_char_workspace() {
+        // Single-char workspace — container containing it scores 60.
+        let score = score_container_name("a-iris", "a");
+        // cn = "a_iris", wb = "a"; cn != wb, cn.starts_with("a") = true → 80 + 10 = 90
+        assert_eq!(score, 90);
+    }
+
+    #[test]
+    fn test_score_container_all_uppercase_normalized() {
+        let score = score_container_name("MY-APP-IRIS", "my_app");
+        // cn = "my_app_iris", wb = "my_app"; cn starts_with wb → 80, ends_with _iris → 10 = 90
+        assert_eq!(score, 90);
+    }
+
+    #[test]
+    fn test_score_container_contains_no_prefix_match() {
+        // "prefix-myapp" starts_with check fails, but contains wb → 60.
+        let score = score_container_name("prefix-myapp", "myapp");
+        // cn = "prefix_myapp", wb = "myapp"; not equal, not starts_with, contains → 60
+        assert_eq!(score, 60);
+    }
+
+    #[test]
+    fn test_iris_web_ports_includes_private_port() {
+        assert!(IRIS_WEB_PORTS.contains(&52773));
+    }
+
+    #[test]
+    fn test_iris_web_ports_includes_http_port() {
+        assert!(IRIS_WEB_PORTS.contains(&80));
+    }
+
+    #[test]
+    fn test_iris_web_ports_includes_legacy_ports() {
+        assert!(IRIS_WEB_PORTS.contains(&41773));
+        assert!(IRIS_WEB_PORTS.contains(&51773));
+    }
+
+    #[test]
+    fn test_score_container_workspace_with_hyphens_vs_underscores() {
+        // Both sides use hyphens — should normalize to same and be exact match.
+        assert_eq!(score_container_name("my-app", "my-app"), 100);
+    }
+
+    #[test]
+    fn test_score_container_exact_match_iris_suffix_underscore() {
+        // Container name exactly equals workspace after normalization, then has _iris appended.
+        // "myapp_iris" vs "myapp": cn starts_with wb → 80, not exact → 80 + 10 = 90
+        let score = score_container_name("myapp_iris", "myapp");
+        assert_eq!(score, 90);
+    }
 }

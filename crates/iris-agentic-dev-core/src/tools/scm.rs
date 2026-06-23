@@ -623,4 +623,99 @@ mod tests {
         // "MyApp.Patient" has a dot but no extension suffix → should get .cls
         assert_eq!(normalized, "MyApp.Patient.cls");
     }
+
+    // ── scm_init_prefix additional ───────────────────────────────────────────
+    #[test]
+    fn test_scm_init_prefix_contains_get_source_control() {
+        let code = scm_init_prefix("user", "pass");
+        // Must bind obj to %SourceControl for instance method calls
+        assert!(code.contains("%SourceControl"), "must bind %SourceControl: {code}");
+    }
+
+    #[test]
+    fn test_scm_init_prefix_writes_scm_unavailable_on_no_obj() {
+        let code = scm_init_prefix("user", "pass");
+        assert!(code.contains("SCM_UNAVAILABLE"), "must write SCM_UNAVAILABLE when obj unavailable: {code}");
+    }
+
+    #[test]
+    fn test_scm_init_prefix_escapes_quotes_in_password() {
+        let code = scm_init_prefix("user", "p\"ass");
+        assert!(code.contains("\"\""), "double-quote in password must be doubled: {code}");
+        assert!(!code.contains("\\\""), "no backslash-quote in password: {code}");
+    }
+
+    // ── user_action_code additional ───────────────────────────────────────────
+    #[test]
+    fn test_user_action_code_contains_user_action() {
+        let code = user_action_code("CheckOut", "MyApp.cls", "user", "pass");
+        assert!(code.contains("UserAction"), "must invoke UserAction: {code}");
+    }
+
+    #[test]
+    fn test_user_action_code_contains_source_menu() {
+        let code = user_action_code("CheckOut", "MyApp.cls", "user", "pass");
+        assert!(code.contains("%SourceMenu"), "must pass %SourceMenu prefix: {code}");
+    }
+
+    #[test]
+    fn test_user_action_code_escapes_quotes_in_credentials() {
+        let code = user_action_code("CheckOut", "Doc.cls", "us\"er", "p\"ass");
+        assert!(code.contains("\"\""), "double-quote in credentials must be doubled: {code}");
+        assert!(!code.contains("\\\""), "no backslash-quote: {code}");
+    }
+
+    // ── menu_all_items_code additional ────────────────────────────────────────
+    #[test]
+    fn test_menu_all_items_code_contains_source_menu() {
+        let code = menu_all_items_code("MyApp.cls", "user", "pass");
+        assert!(code.contains("%SourceMenu"), "must pass %SourceMenu to Execute: {code}");
+    }
+
+    #[test]
+    fn test_menu_all_items_code_escapes_quotes_in_doc() {
+        let code = menu_all_items_code("My\"App.cls", "user", "pass");
+        assert!(code.contains("\"\""), "double-quote in doc must be doubled: {code}");
+        assert!(!code.contains("\\\""), "no backslash-quote: {code}");
+    }
+
+    #[test]
+    fn test_menu_all_items_code_contains_source_control_create() {
+        let code = menu_all_items_code("MyApp.cls", "user", "pass");
+        assert!(code.contains("SourceControlCreate"), "must init session: {code}");
+    }
+
+    // ── after_user_action_code additional ────────────────────────────────────
+    #[test]
+    fn test_after_user_action_code_contains_source_menu() {
+        let code = after_user_action_code("CheckOut", "MyApp.cls", "yes", "user", "pass");
+        assert!(code.contains("%SourceMenu"), "must pass %SourceMenu: {code}");
+    }
+
+    #[test]
+    fn test_after_user_action_code_contains_user_action() {
+        let code = after_user_action_code("CheckOut", "MyApp.cls", "yes", "user", "pass");
+        assert!(code.contains("UserAction"), "must call UserAction first: {code}");
+    }
+
+    #[test]
+    fn test_after_user_action_code_writes_error_text() {
+        let code = after_user_action_code("CheckOut", "MyApp.cls", "yes", "user", "pass");
+        assert!(code.contains("GetErrorText"), "must write error text from AfterUserAction: {code}");
+    }
+
+    // ── parse_action_msg edge cases ───────────────────────────────────────────
+    #[test]
+    fn test_parse_action_msg_empty_string() {
+        let (code, msg) = parse_action_msg("");
+        assert_eq!(code, 0);
+        assert_eq!(msg, "");
+    }
+
+    #[test]
+    fn test_parse_action_msg_whitespace_trimmed() {
+        let (code, msg) = parse_action_msg("  1  |  some msg  ");
+        assert_eq!(code, 1);
+        assert_eq!(msg, "some msg");
+    }
 }

@@ -349,4 +349,161 @@ mod tests {
         let lock = resolve.to_lock();
         assert_eq!(lock.packages[0].repository, "openexchange:some-pkg-id");
     }
+
+    // --- additional tests ---
+
+    #[test]
+    fn test_dep_to_source_github_splits_on_first_slash() {
+        // "owner/org/repo" — splitn(2, '/') keeps trailing part intact
+        let dep = dep_github("owner/org/repo");
+        let source = dep_to_source("pkg", &dep).unwrap();
+        if let ResolvedSource::GitHub { owner, repo } = source {
+            assert_eq!(owner, "owner");
+            assert_eq!(repo, "org/repo");
+        } else {
+            panic!("expected GitHub source");
+        }
+    }
+
+    #[test]
+    fn test_dep_to_source_github_missing_slash_falls_through_to_error() {
+        // A github value with no '/' cannot be split into owner/repo;
+        // dep_to_source falls through to the error branch.
+        let dep = DependencySpec {
+            version: "0.1.0".to_string(),
+            git: None,
+            github: Some("noslash".to_string()),
+            openexchange: None,
+            repository: None,
+        };
+        let result = dep_to_source("pkg", &dep);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dep_to_source_git_url_preserved() {
+        let url = "https://github.com/example/project.git";
+        let dep = dep_git(url);
+        let source = dep_to_source("pkg", &dep).unwrap();
+        if let ResolvedSource::Git(got) = source {
+            assert_eq!(got, url);
+        } else {
+            panic!("expected Git source");
+        }
+    }
+
+    #[test]
+    fn test_dep_to_source_openexchange_id_preserved() {
+        let id = "ZPM-community-iris-tools";
+        let dep = dep_ox(id);
+        let source = dep_to_source("pkg", &dep).unwrap();
+        if let ResolvedSource::OpenExchange(got) = source {
+            assert_eq!(got, id);
+        } else {
+            panic!("expected OpenExchange source");
+        }
+    }
+
+    #[test]
+    fn test_to_lock_git_url_preserved() {
+        let url = "https://github.com/example/project.git";
+        let pkg = ResolvedPackage {
+            name: "gitpkg".to_string(),
+            version: Version::parse("2.0.0").unwrap(),
+            source: ResolvedSource::Git(url.to_string()),
+        };
+        let resolve = Resolve { packages: vec![pkg] };
+        let lock = resolve.to_lock();
+        assert_eq!(lock.packages[0].repository, url);
+    }
+
+    #[test]
+    fn test_to_lock_local_path_preserved() {
+        let path = "/home/user/my-pkg";
+        let pkg = ResolvedPackage {
+            name: "localpkg".to_string(),
+            version: Version::parse("0.5.1").unwrap(),
+            source: ResolvedSource::Local(std::path::PathBuf::from(path)),
+        };
+        let resolve = Resolve { packages: vec![pkg] };
+        let lock = resolve.to_lock();
+        assert_eq!(lock.packages[0].repository, path);
+    }
+
+    #[test]
+    fn test_to_lock_checksum_is_none() {
+        let pkg = ResolvedPackage {
+            name: "pkg".to_string(),
+            version: Version::parse("1.0.0").unwrap(),
+            source: ResolvedSource::Git("https://example.com/repo.git".to_string()),
+        };
+        let resolve = Resolve { packages: vec![pkg] };
+        let lock = resolve.to_lock();
+        assert!(lock.packages[0].checksum.is_none());
+    }
+
+    #[test]
+    fn test_resolve_lock_to_toml_header() {
+        let lock = ResolveLock { packages: vec![] };
+        let toml = lock.to_toml();
+        assert!(toml.starts_with("[metadata]\nformat-version = 1\n"));
+    }
+
+    #[test]
+    fn test_resolve_lock_to_toml_package_entry() {
+        let lock = ResolveLock {
+            packages: vec![PackageLock {
+                name: "mypkg".to_string(),
+                version: "1.2.3".to_string(),
+                repository: "https://github.com/alice/myrepo".to_string(),
+                checksum: None,
+            }],
+        };
+        let toml = lock.to_toml();
+        assert!(toml.contains("[[package]]"));
+        assert!(toml.contains("name = \"mypkg\""));
+        assert!(toml.contains("version = \"1.2.3\""));
+        assert!(toml.contains("repository = \"https://github.com/alice/myrepo\""));
+    }
+
+    #[test]
+    fn test_resolve_lock_to_toml_escapes_double_quotes() {
+        let lock = ResolveLock {
+            packages: vec![PackageLock {
+                name: "pkg-with-\"quote\"".to_string(),
+                version: "0.1.0".to_string(),
+                repository: "https://example.com".to_string(),
+                checksum: None,
+            }],
+        };
+        let toml = lock.to_toml();
+        // Ensure the raw quote is escaped, not left bare
+        assert!(toml.contains("\\\"quote\\\""));
+        assert!(!toml.contains("\"quote\""));
+    }
+
+    #[test]
+    fn test_resolve_lock_to_toml_multiple_packages() {
+        let lock = ResolveLock {
+            packages: vec![
+                PackageLock {
+                    name: "a".to_string(),
+                    version: "1.0.0".to_string(),
+                    repository: "https://github.com/x/a".to_string(),
+                    checksum: None,
+                },
+                PackageLock {
+                    name: "b".to_string(),
+                    version: "2.0.0".to_string(),
+                    repository: "https://github.com/x/b".to_string(),
+                    checksum: None,
+                },
+            ],
+        };
+        let toml = lock.to_toml();
+        let count = toml.matches("[[package]]").count();
+        assert_eq!(count, 2);
+        assert!(toml.contains("name = \"a\""));
+        assert!(toml.contains("name = \"b\""));
+    }
 }
