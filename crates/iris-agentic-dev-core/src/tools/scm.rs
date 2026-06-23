@@ -17,16 +17,8 @@ fn default_namespace() -> String {
     "USER".to_string()
 }
 
-/// Known menu item names to probe via OnMenuItem.
-pub const KNOWN_MENU_ITEMS: &[&str] = &[
-    "CheckOut",
-    "UndoCheckOut",
-    "CheckIn",
-    "GetLatest",
-    "Status",
-    "History",
-    "AddToSourceControl",
-];
+/// Menu prefix used for source control actions.
+pub const SCM_MENU: &str = "%SourceMenu";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ScmParams {
@@ -44,11 +36,11 @@ pub struct ScmParams {
 
 async fn xecute(
     iris: &IrisConnection,
-    _client: &reqwest::Client,
+    client: &reqwest::Client,
     code: &str,
     namespace: &str,
 ) -> anyhow::Result<String> {
-    iris.execute(code, namespace).await
+    iris.execute_via_generator(code, namespace, client).await
 }
 
 /// Escape a string for safe interpolation into an ObjectScript double-quoted literal.
@@ -76,7 +68,20 @@ pub async fn handle_iris_source_control(
     p: ScmParams,
     elicitation_store: &ElicitationStore,
 ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
-    let doc = p.document.as_deref().unwrap_or("");
+    let raw_doc = p.document.as_deref().unwrap_or("");
+    let doc_owned;
+    let raw_lower = raw_doc.to_ascii_lowercase();
+    let doc = if !raw_doc.is_empty()
+        && !raw_lower.ends_with(".cls")
+        && !raw_lower.ends_with(".mac")
+        && !raw_lower.ends_with(".inc")
+        && !raw_lower.ends_with(".int")
+    {
+        doc_owned = format!("{}.cls", raw_doc);
+        doc_owned.as_str()
+    } else {
+        raw_doc
+    };
     let ns = &p.namespace;
 
     // Handle elicitation resume
@@ -89,12 +94,12 @@ pub async fn handle_iris_source_control(
         };
         elicitation_store.clear(eid);
         let action_id = pending.scm_action_id.as_deref().unwrap_or("");
-        let after_code = format!(
-            "set sc=##class(%Studio.SourceControl.Base).AfterUserAction(0,\"{}\",\"{}\",{},\"{}\") write $system.Status.GetErrorText(sc)",
-            os_quote(action_id),
-            os_quote(&pending.document),
-            if answer == "yes" { "1" } else { "0" },
-            os_quote(answer),
+        let after_code = after_user_action_code(
+            action_id,
+            &pending.document,
+            answer,
+            &iris.username,
+            &iris.password,
         );
         let out = match xecute(iris, client, &after_code, &pending.namespace).await {
             Ok(o) => o,
@@ -114,7 +119,8 @@ pub async fn handle_iris_source_control(
                 );
             }
         };
-        if out.is_empty() || out.starts_with('$') {
+        let out = out.lines().next().unwrap_or("").trim().to_string();
+        if out.is_empty() {
             return ok_json(
                 serde_json::json!({"success": true, "document": pending.document, "action_id": action_id}),
             );
@@ -124,25 +130,19 @@ pub async fn handle_iris_source_control(
 
     match p.action.as_str() {
         "status" => {
-            // Check if SCM is installed
-            let doc_q = os_quote(doc);
-            // Use %Studio.SourceControl.Interface.GetStatus() — the stable public API used by
-            // ISC's own tooling. Avoids %GetImplementationObject which is undocumented and
-            // absent on some IRIS versions (reported in #61).
-            // GetStatus returns inSC (1=controlled) and editable (1=editable) by reference.
-            // Fall back to UNCONTROLLED if the Interface class itself is missing (pre-2022 IRIS).
-            let check_code = format!(
-                "set scmClass=##class(%Studio.SourceControl.Interface).SourceControlClassGet() if scmClass=\"\" {{ write \"UNCONTROLLED\" }} else {{ set inSC=0 set editable=1 set tSC=##class(%Studio.SourceControl.Interface).GetStatus(\"{doc_q}\",.inSC,.editable) if 'inSC {{ write \"UNCONTROLLED\" }} else {{ if editable=\"\" {{ set editable=1 }} new %SourceControl do ##class(%Studio.SourceControl.Interface).SourceControlCreate() set owner=$select($IsObject($get(%SourceControl)):$get(%SourceControl.Owner),1:\"\") write editable_\"|\"_owner }} }}"
-            );
-            let out = xecute(iris, client, &check_code, ns)
+            let check_code = status_check_code(doc, &iris.username, &iris.password);
+            let raw = xecute(iris, client, &check_code, ns)
                 .await
                 .unwrap_or_else(|_| "UNCONTROLLED".to_string());
-            if out.trim() == "UNCONTROLLED" || out.is_empty() {
+            // SourceControlCreate may leave $ZERROR set, which the executor appends as
+            // "ERROR($ZERROR): <ENDOFFILE>" on subsequent lines — take only the first line.
+            let out = raw.lines().next().unwrap_or("").trim().to_string();
+            if out == "UNCONTROLLED" || out.is_empty() {
                 return ok_json(
                     serde_json::json!({"success":true,"controlled":false,"editable":true,"locked":false,"owner":null}),
                 );
             }
-            let (editable_flag, owner) = parse_action_msg(&out);
+            let (editable_flag, owner) = parse_action_msg(out.as_str());
             let editable = editable_flag == 1;
             let owner = Some(owner).filter(|s| !s.is_empty());
             ok_json(serde_json::json!({
@@ -155,43 +155,45 @@ pub async fn handle_iris_source_control(
         }
 
         "menu" => {
-            let doc_q = os_quote(doc);
+            let code = menu_all_items_code(doc, &iris.username, &iris.password);
+            let raw = xecute(iris, client, &code, ns).await.unwrap_or_default();
             let mut actions = vec![];
-            for &item in KNOWN_MENU_ITEMS {
-                let code = format!(
-                    "set enabled=0 set displayName=\"{item}\" set sc=##class(%Studio.SourceControl.Base).OnMenuItem(\"%SourceMenu,{item}\",\"{doc_q}\",\"\",.enabled,.displayName) write enabled_\"|\"_displayName"
-                );
-                let out = xecute(iris, client, &code, ns).await.unwrap_or_default();
-                let (enabled_flag, label) = parse_action_msg(&out);
-                if enabled_flag == 1 {
-                    let label = if label.is_empty() {
-                        item.to_string()
-                    } else {
-                        label.to_string()
-                    };
-                    actions.push(serde_json::json!({"id": item, "label": label, "enabled": true}));
+            for line in raw.lines() {
+                let line = line.trim();
+                if line == "SCM_UNAVAILABLE" || line.is_empty() || line.starts_with("ERROR") {
+                    continue;
+                }
+                // format: "name|enabled"
+                let mut parts = line.splitn(2, '|');
+                let name = parts.next().unwrap_or("").trim();
+                let enabled: u8 = parts
+                    .next()
+                    .and_then(|s| s.trim().parse().ok())
+                    .unwrap_or(0);
+                if enabled == 1 && !name.is_empty() {
+                    actions.push(serde_json::json!({"id": name, "label": name, "enabled": true}));
                 }
             }
             ok_json(serde_json::json!({"success": true, "document": doc, "actions": actions}))
         }
 
         "checkout" => {
-            let code = user_action_code("CheckOut", doc);
-            let out = match xecute(iris, client, &code, ns).await {
+            let code = user_action_code("%CheckOut", doc, &iris.username, &iris.password);
+            let raw = match xecute(iris, client, &code, ns).await {
                 Ok(o) => o,
                 Err(e) => {
-                    let msg = e.to_string();
-                    let (ec, emsg) = if msg == "DOCKER_REQUIRED" {
-                        ("DOCKER_REQUIRED", "SCM checkout requires docker exec. Set IRIS_CONTAINER=<container_name>.".to_string())
-                    } else {
-                        ("SCM_UNAVAILABLE", msg)
-                    };
                     return ok_json(
-                        serde_json::json!({"success": false, "error_code": ec, "error": emsg}),
-                    );
+                        serde_json::json!({"success": false, "error_code": "SCM_UNAVAILABLE", "error": e.to_string()}),
+                    )
                 }
             };
-            let (action_code, msg) = parse_action_msg(&out);
+            let out = raw.lines().next().unwrap_or("").trim();
+            if out == "SCM_UNAVAILABLE" {
+                return ok_json(
+                    serde_json::json!({"success": false, "error_code": "SCM_UNAVAILABLE", "error": "Source control session could not be initialized"}),
+                );
+            }
+            let (action_code, msg) = parse_action_msg(out);
 
             if action_code == 0 {
                 return ok_json(
@@ -203,7 +205,7 @@ pub async fn handle_iris_source_control(
                 doc,
                 ElicitationAction::ScmExecute,
                 None,
-                Some("CheckOut".to_string()),
+                Some("%CheckOut".to_string()),
                 ns.clone(),
             );
             ok_json(serde_json::json!({
@@ -217,22 +219,22 @@ pub async fn handle_iris_source_control(
 
         "execute" => {
             let action_id = p.action_id.as_deref().unwrap_or("");
-            let code = user_action_code(action_id, doc);
-            let out = match xecute(iris, client, &code, ns).await {
+            let code = user_action_code(action_id, doc, &iris.username, &iris.password);
+            let raw = match xecute(iris, client, &code, ns).await {
                 Ok(o) => o,
                 Err(e) => {
-                    let msg = e.to_string();
-                    let (ec, emsg) = if msg == "DOCKER_REQUIRED" {
-                        ("DOCKER_REQUIRED", "SCM execute requires docker exec. Set IRIS_CONTAINER=<container_name>.".to_string())
-                    } else {
-                        ("SCM_UNAVAILABLE", msg)
-                    };
                     return ok_json(
-                        serde_json::json!({"success": false, "error_code": ec, "error": emsg}),
-                    );
+                        serde_json::json!({"success": false, "error_code": "SCM_UNAVAILABLE", "error": e.to_string()}),
+                    )
                 }
             };
-            let (action_code, msg) = parse_action_msg(&out);
+            let out = raw.lines().next().unwrap_or("").trim();
+            if out == "SCM_UNAVAILABLE" {
+                return ok_json(
+                    serde_json::json!({"success": false, "error_code": "SCM_UNAVAILABLE", "error": "Source control session could not be initialized"}),
+                );
+            }
+            let (action_code, msg) = parse_action_msg(out);
 
             match action_code {
                 0 => ok_json(
@@ -285,13 +287,91 @@ pub async fn handle_iris_source_control(
     }
 }
 
-/// Build the ObjectScript snippet that invokes `%Studio.SourceControl.Base:UserAction`
-/// for a given menu item id and document, writing "action|msg" to the output stream.
-fn user_action_code(action_id: &str, doc: &str) -> String {
+/// Build the ObjectScript snippet that determines SCM status for a document.
+/// Uses GetStatus for controlled/uncontrolled, then MenuItems to deduce editable/owner
+/// since many SCM implementations don't populate GetStatus's editable/owner fields.
+/// Output: "UNCONTROLLED" | "1|owner" (checked out by me) | "0|" (locked)
+fn status_check_code(doc: &str, username: &str, password: &str) -> String {
+    let doc_q = os_quote(doc);
+    let user_q = os_quote(username);
+    let pass_q = os_quote(password);
     format!(
-        "set action=0 set target=\"\" set msg=\"\" set reload=0 set sc=##class(%Studio.SourceControl.Base).UserAction(0,\"%SourceMenu,{}\",\"{}\",\"\",.action,.target,.msg,.reload) write action_\"|\"_msg",
+        "set sc=##class(%Studio.SourceControl.Interface).SourceControlCreate(\"{user_q}\",\"{pass_q}\",.created,.flags,.outuser) \
+         set isInSC=0 \
+         set sc=##class(%Studio.SourceControl.Interface).GetStatus(\"{doc_q}\",.isInSC,.editable,.isCheckedOut,.owner) \
+         if $system.Status.IsError(sc)||('isInSC) {{ write \"UNCONTROLLED\" }} \
+         else {{ \
+           set hasUndoCheckout=0 set hasCheckOut=0 \
+           set rset=##class(%ResultSet).%New(\"%Studio.SourceControl.Interface:MenuItems\") \
+           set sc=rset.Execute(\"%SourceMenu\",\"{doc_q}\",\"\") \
+           while rset.Next() {{ \
+             set itemName=rset.GetData(1) set itemEnabled=rset.GetData(2) \
+             if itemEnabled&&(itemName=\"%UndoCheckout\") {{ set hasUndoCheckout=1 }} \
+             if itemEnabled&&(itemName=\"%CheckOut\") {{ set hasCheckOut=1 }} \
+           }} \
+           if hasUndoCheckout {{ write 1_\"|\"_\"{user_q}\" }} \
+           else {{ write \"0|\" }} \
+         }}"
+    )
+}
+
+/// Prefix that initializes a SCM session via SourceControlCreate and binds obj=%SourceControl.
+/// All SCM methods are instance methods — they require an active %SourceControl object.
+fn scm_init_prefix(username: &str, password: &str) -> String {
+    let user_q = os_quote(username);
+    let pass_q = os_quote(password);
+    format!(
+        "set sc=##class(%Studio.SourceControl.Interface).SourceControlCreate(\"{user_q}\",\"{pass_q}\",.created,.flags,.outuser) \
+         set obj=$get(%SourceControl) \
+         if '$IsObject(obj) {{ write \"SCM_UNAVAILABLE\" quit }} "
+    )
+}
+
+/// Build the ObjectScript snippet that invokes `UserAction` on the SCM instance,
+/// writing "action|msg" to the output stream.
+fn user_action_code(action_id: &str, doc: &str, username: &str, password: &str) -> String {
+    let prefix = scm_init_prefix(username, password);
+    format!(
+        "{prefix}set action=0 set target=\"\" set msg=\"\" set reload=0 \
+         set sc=obj.UserAction(0,\"%SourceMenu,{}\",\"{}\",\"\",.action,.target,.msg,.reload) \
+         write action_\"|\"_$select(msg'=\"\":msg,target'=\"\":target,1:\"\")",
         os_quote(action_id),
         os_quote(doc),
+    )
+}
+
+/// Build the ObjectScript snippet that re-runs `UserAction` then immediately calls
+/// `AfterUserAction` in the same job, so %SourceControl state is preserved.
+fn after_user_action_code(
+    action_id: &str,
+    doc: &str,
+    answer: &str,
+    username: &str,
+    password: &str,
+) -> String {
+    let prefix = scm_init_prefix(username, password);
+    let answer_int = if answer == "yes" { "1" } else { "0" };
+    let action_id_q = os_quote(action_id);
+    let doc_q = os_quote(doc);
+    format!(
+        "{prefix}\
+         set action=0 set target=\"\" set msg=\"\" set reload=0 \
+         set sc=obj.UserAction(0,\"%SourceMenu,{action_id_q}\",\"{doc_q}\",\"\",.action,.target,.msg,.reload) \
+         set sc=obj.AfterUserAction(0,\"%SourceMenu,{action_id_q}\",\"{doc_q}\",{answer_int},\"\") \
+         write $system.Status.GetErrorText(sc)"
+    )
+}
+
+/// Build a single ObjectScript snippet that queries all enabled SCM menu items via
+/// the MenuItems ResultSet, writing one "name|enabled|displayName" line per item.
+fn menu_all_items_code(doc: &str, username: &str, password: &str) -> String {
+    let prefix = scm_init_prefix(username, password);
+    let doc_q = os_quote(doc);
+    format!(
+        "{prefix}\
+         set rset=##class(%ResultSet).%New(\"%Studio.SourceControl.Interface:MenuItems\") \
+         set sc=rset.Execute(\"%SourceMenu\",\"{doc_q}\",\"\") \
+         while rset.Next() {{ write rset.GetData(1)_\"|\"_rset.GetData(2),! }}"
     )
 }
 
@@ -357,7 +437,7 @@ mod tests {
     // ── user_action_code ──────────────────────────────────────────────────────
     #[test]
     fn test_user_action_code_no_backslash_quote() {
-        let code = user_action_code("CheckOut", "MyApp.Patient.cls");
+        let code = user_action_code("CheckOut", "MyApp.Patient.cls", "user", "pass");
         assert!(
             !code.contains("\\\""),
             "must use ObjectScript quoting, not backslash: {}",
@@ -376,7 +456,7 @@ mod tests {
     }
     #[test]
     fn test_user_action_code_escapes_quotes_in_action() {
-        let code = user_action_code("Check\"Out", "Doc.cls");
+        let code = user_action_code("Check\"Out", "Doc.cls", "user", "pass");
         assert!(
             code.contains("\"\""),
             "double-quote must become \"\": {}",
@@ -386,7 +466,7 @@ mod tests {
     }
     #[test]
     fn test_user_action_code_escapes_newline_in_doc() {
-        let code = user_action_code("CheckOut", "Doc\nwith\nnewlines.cls");
+        let code = user_action_code("CheckOut", "Doc\nwith\nnewlines.cls", "user", "pass");
         assert!(
             code.contains("$Char(10)"),
             "newline must become $Char(10): {}",
@@ -394,11 +474,87 @@ mod tests {
         );
     }
 
-    // ── KNOWN_MENU_ITEMS ──────────────────────────────────────────────────────
+    // ── status_check_code ─────────────────────────────────────────────────────
     #[test]
-    fn test_known_menu_items_has_checkout() {
-        assert!(KNOWN_MENU_ITEMS.contains(&"CheckOut"));
-        assert!(KNOWN_MENU_ITEMS.contains(&"CheckIn"));
-        assert!(KNOWN_MENU_ITEMS.contains(&"GetLatest"));
+    fn test_status_check_code_uses_get_status() {
+        let code = status_check_code("MyApp.Patient.cls", "user", "pass");
+        assert!(
+            code.contains("%Studio.SourceControl.Interface"),
+            "must use Interface class: {code}"
+        );
+        assert!(code.contains("GetStatus"), "must call GetStatus: {code}");
+        assert!(
+            code.contains("SourceControlCreate"),
+            "must init session: {code}"
+        );
+        assert!(
+            !code.contains("%GetImplementationObject"),
+            "must not use removed method: {code}"
+        );
+    }
+
+    #[test]
+    fn test_status_check_code_contains_doc() {
+        let code = status_check_code("MyApp.Patient.cls", "user", "pass");
+        assert!(
+            code.contains("MyApp.Patient.cls"),
+            "must embed document name: {code}"
+        );
+    }
+
+    #[test]
+    fn test_status_check_code_escapes_quotes_in_doc() {
+        let code = status_check_code("My\"App.cls", "user", "pass");
+        assert!(
+            code.contains("\"\""),
+            "double-quote must become \"\": {code}"
+        );
+        assert!(!code.contains("\\\""), "no backslash-quote: {code}");
+    }
+
+    #[test]
+    fn test_status_check_code_escapes_quotes_in_credentials() {
+        let code = status_check_code("Any.cls", "us\"er", "p\"ass");
+        assert!(
+            code.contains("\"\""),
+            "double-quote in credentials must be escaped: {code}"
+        );
+    }
+
+    #[test]
+    fn test_status_check_code_writes_uncontrolled_branch() {
+        let code = status_check_code("Any.cls", "user", "pass");
+        assert!(
+            code.contains("UNCONTROLLED"),
+            "must write UNCONTROLLED when not in SC: {code}"
+        );
+    }
+
+    #[test]
+    fn test_status_check_code_uses_menu_items_for_checkout_state() {
+        let code = status_check_code("Any.cls", "user", "pass");
+        assert!(
+            code.contains("MenuItems"),
+            "must use MenuItems to deduce checkout state: {code}"
+        );
+        assert!(
+            code.contains("%UndoCheckout"),
+            "must check for UndoCheckout to detect checked-out: {code}"
+        );
+    }
+
+    #[test]
+    fn test_status_check_code_writes_owner_when_checked_out() {
+        let code = status_check_code("Any.cls", "myuser", "pass");
+        assert!(
+            code.contains("1_\"|\"_\"myuser\""),
+            "must write 1|username when checked out: {code}"
+        );
+    }
+
+    // ── SCM_MENU ──────────────────────────────────────────────────────────────
+    #[test]
+    fn test_scm_menu_prefix() {
+        assert_eq!(SCM_MENU, "%SourceMenu");
     }
 }
