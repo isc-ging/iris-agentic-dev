@@ -5,6 +5,9 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+testing = []
+
 [dependencies]
 rmcp.workspace = true
 tokio.workspace = true
@@ -210,3 +213,8 @@ path = "tests/integration/test_sql_translate_e2e.rs"
 [[test]]
 name = "test_skills_mod_unit"
 path = "tests/unit/test_skills_mod_unit.rs"
+
+[[test]]
+name = "test_handlers_live"
+path = "tests/integration/test_handlers_live.rs"
+required-features = ["testing"]

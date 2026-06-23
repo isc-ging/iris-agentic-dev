@@ -280,6 +280,155 @@ namespace = "{namespace}"
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    // ── workspace_root tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn workspace_root_env_var_overrides_all() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("OBJECTSCRIPT_WORKSPACE", dir.path().to_str().unwrap());
+        let root = workspace_root(None);
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        assert_eq!(root, dir.path());
+    }
+
+    #[test]
+    fn workspace_root_env_overrides_arg() {
+        // When env is set, it takes priority over the arg
+        let env_dir = tempfile::tempdir().unwrap();
+        let arg_dir = tempfile::tempdir().unwrap();
+        std::env::set_var("OBJECTSCRIPT_WORKSPACE", env_dir.path().to_str().unwrap());
+        let root = workspace_root(Some(arg_dir.path().to_str().unwrap()));
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        assert_eq!(root, env_dir.path(), "env var must win over arg");
+    }
+
+    #[test]
+    fn workspace_root_empty_arg_falls_through() {
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        let root = workspace_root(Some(""));
+        // Falls through to cwd-walk — just check it doesn't panic and returns something
+        assert!(root.is_absolute() || root.to_str() == Some("."));
+    }
+
+    #[test]
+    fn workspace_root_dot_arg_falls_through() {
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        let root = workspace_root(Some("."));
+        assert!(root.is_absolute() || root.to_str() == Some("."));
+    }
+
+    // ── load_workspace_config tests ──────────────────────────────────────────
+
+    #[test]
+    fn load_config_missing_file_returns_none() {
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("OBJECTSCRIPT_WORKSPACE", dir.path().to_str().unwrap());
+        let result = load_workspace_config(None);
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_config_valid_toml_returns_some() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join(".iris-agentic-dev.toml")).unwrap();
+        writeln!(
+            f,
+            "host = \"localhost\"\nweb_port = 52773\nnamespace = \"USER\""
+        )
+        .unwrap();
+        std::env::set_var("OBJECTSCRIPT_WORKSPACE", dir.path().to_str().unwrap());
+        let result = load_workspace_config(None);
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        let cfg = result.expect("should load config");
+        assert_eq!(cfg.host.as_deref(), Some("localhost"));
+        assert_eq!(cfg.web_port, Some(52773));
+    }
+
+    #[test]
+    fn load_config_invalid_toml_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join(".iris-agentic-dev.toml")).unwrap();
+        writeln!(f, "this is not valid toml ={{{{").unwrap();
+        std::env::set_var("OBJECTSCRIPT_WORKSPACE", dir.path().to_str().unwrap());
+        let result = load_workspace_config(None);
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_config_legacy_iris_dev_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join(".iris-dev.toml")).unwrap();
+        writeln!(f, "host = \"myhost\"\nweb_port = 52773").unwrap();
+        std::env::set_var("OBJECTSCRIPT_WORKSPACE", dir.path().to_str().unwrap());
+        let result = load_workspace_config(None);
+        std::env::remove_var("OBJECTSCRIPT_WORKSPACE");
+        // Legacy file may or may not be picked up depending on priority; at minimum no panic
+        let _ = result;
+    }
+
+    // ── workspace_config_to_connection tests ─────────────────────────────────
+
+    #[test]
+    fn config_with_host_returns_connection() {
+        let cfg = WorkspaceConfig {
+            host: Some("localhost".to_string()),
+            web_port: Some(52773),
+            namespace: Some("USER".to_string()),
+            container: None,
+            username: None,
+            password: None,
+            scheme: None,
+            web_prefix: None,
+            docker_only: false,
+        };
+        let conn = workspace_config_to_connection(&cfg, "USER");
+        assert!(conn.is_some(), "host config should produce connection");
+    }
+
+    #[test]
+    fn config_with_container_only_returns_none_and_sets_env() {
+        std::env::remove_var("IRIS_CONTAINER");
+        let cfg = WorkspaceConfig {
+            host: None,
+            web_port: None,
+            namespace: Some("MYNS".to_string()),
+            container: Some("my-iris-container".to_string()),
+            username: None,
+            password: None,
+            scheme: None,
+            web_prefix: None,
+            docker_only: false,
+        };
+        let conn = workspace_config_to_connection(&cfg, "USER");
+        let container_env = std::env::var("IRIS_CONTAINER").ok();
+        std::env::remove_var("IRIS_CONTAINER");
+        assert!(conn.is_none(), "container-only config should return None");
+        assert_eq!(container_env.as_deref(), Some("my-iris-container"));
+    }
+
+    #[test]
+    fn config_empty_returns_none() {
+        let cfg = WorkspaceConfig {
+            host: None,
+            web_port: None,
+            namespace: None,
+            container: None,
+            username: None,
+            password: None,
+            scheme: None,
+            web_prefix: None,
+            docker_only: false,
+        };
+        let conn = workspace_config_to_connection(&cfg, "USER");
+        assert!(conn.is_none());
+    }
+
+    // ── generate_toml_content tests ──────────────────────────────────────────
 
     #[test]
     fn toml_template_native_section_before_container() {

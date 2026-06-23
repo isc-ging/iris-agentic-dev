@@ -234,8 +234,7 @@ mod serde_param_structs {
 
     #[test]
     fn production_status_params_full_status_true() {
-        let p: ProductionStatusParams =
-            serde_json::from_str(r#"{"full_status": true}"#).unwrap();
+        let p: ProductionStatusParams = serde_json::from_str(r#"{"full_status": true}"#).unwrap();
         assert!(p.full_status);
     }
 
@@ -266,8 +265,7 @@ mod serde_param_structs {
 
     #[test]
     fn production_stop_params_defaults() {
-        let p: ProductionStopParams =
-            serde_json::from_str(r#"{"namespace":"USER"}"#).unwrap();
+        let p: ProductionStopParams = serde_json::from_str(r#"{"namespace":"USER"}"#).unwrap();
         assert_eq!(p.timeout, 30);
         assert!(!p.force);
         assert!(p.production.is_none());
@@ -378,7 +376,10 @@ mod serde_param_structs {
         )
         .unwrap();
         assert_eq!(p.settings.len(), 2);
-        assert_eq!(p.settings.get("CallInterval").map(|s| s.as_str()), Some("5"));
+        assert_eq!(
+            p.settings.get("CallInterval").map(|s| s.as_str()),
+            Some("5")
+        );
         assert_eq!(
             p.settings.get("ReplyCodeActions").map(|s| s.as_str()),
             Some("E=R")
@@ -395,8 +396,7 @@ mod serde_param_structs {
 
     #[test]
     fn credential_list_params_custom_ns() {
-        let p: CredentialListParams =
-            serde_json::from_str(r#"{"namespace":"HEALTH"}"#).unwrap();
+        let p: CredentialListParams = serde_json::from_str(r#"{"namespace":"HEALTH"}"#).unwrap();
         assert_eq!(p.namespace, "HEALTH");
     }
 

@@ -6,8 +6,7 @@ use iris_agentic_dev_core::tools::info::{
 
 #[test]
 fn info_params_defaults() {
-    let p: InfoParams =
-        serde_json::from_str(r#"{"what":"documents"}"#).unwrap();
+    let p: InfoParams = serde_json::from_str(r#"{"what":"documents"}"#).unwrap();
     assert_eq!(p.what, "documents");
     assert!(p.doc_type.is_none());
     assert_eq!(p.namespace, "USER");
@@ -16,8 +15,7 @@ fn info_params_defaults() {
 
 #[test]
 fn info_params_with_doc_type() {
-    let p: InfoParams =
-        serde_json::from_str(r#"{"what":"documents","doc_type":"CLS"}"#).unwrap();
+    let p: InfoParams = serde_json::from_str(r#"{"what":"documents","doc_type":"CLS"}"#).unwrap();
     assert_eq!(p.doc_type.as_deref(), Some("CLS"));
 }
 
@@ -29,8 +27,7 @@ fn info_params_missing_what_fails() {
 
 #[test]
 fn macro_params_defaults() {
-    let p: MacroParams =
-        serde_json::from_str(r#"{"action":"list"}"#).unwrap();
+    let p: MacroParams = serde_json::from_str(r#"{"action":"list"}"#).unwrap();
     assert_eq!(p.action, "list");
     assert!(p.name.is_none());
     assert!(p.args.is_empty());
@@ -47,8 +44,7 @@ fn macro_params_with_name_and_args() {
 
 #[test]
 fn generate_params_defaults_gen_type_class() {
-    let p: GenerateParams =
-        serde_json::from_str(r#"{"description":"a simple class"}"#).unwrap();
+    let p: GenerateParams = serde_json::from_str(r#"{"description":"a simple class"}"#).unwrap();
     assert_eq!(p.gen_type, "class");
     assert!(p.class_name.is_none());
     assert_eq!(p.namespace, "USER");
@@ -56,16 +52,17 @@ fn generate_params_defaults_gen_type_class() {
 
 #[test]
 fn generate_params_test_type() {
-    let p: GenerateParams =
-        serde_json::from_str(r#"{"description":"tests for Foo","gen_type":"test","class_name":"Foo.Bar"}"#).unwrap();
+    let p: GenerateParams = serde_json::from_str(
+        r#"{"description":"tests for Foo","gen_type":"test","class_name":"Foo.Bar"}"#,
+    )
+    .unwrap();
     assert_eq!(p.gen_type, "test");
     assert_eq!(p.class_name.as_deref(), Some("Foo.Bar"));
 }
 
 #[test]
 fn table_info_params_defaults() {
-    let p: TableInfoParams =
-        serde_json::from_str(r#"{"table":"SQLUser.MyTable"}"#).unwrap();
+    let p: TableInfoParams = serde_json::from_str(r#"{"table":"SQLUser.MyTable"}"#).unwrap();
     assert_eq!(p.table, "SQLUser.MyTable");
     assert_eq!(p.namespace, "USER");
     assert!(!p.include_row_count);

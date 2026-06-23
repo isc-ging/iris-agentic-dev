@@ -205,3 +205,195 @@ impl VsCodeSettings {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn strip(s: &str) -> String {
+        strip_jsonc(s)
+    }
+
+    #[test]
+    fn strip_plain_json_unchanged() {
+        let s = r#"{"key": "value"}"#;
+        assert_eq!(strip(s).trim(), s.trim());
+    }
+
+    #[test]
+    fn strip_line_comment() {
+        let s = "{\n// comment\n\"key\": 1\n}";
+        let out = strip(s);
+        assert!(!out.contains("// comment"));
+        assert!(out.contains("\"key\""));
+    }
+
+    #[test]
+    fn strip_inline_comment() {
+        let s = r#"{"key": 1 // inline comment
+}"#;
+        let out = strip(s);
+        assert!(!out.contains("// inline comment"));
+        assert!(out.contains("\"key\""));
+    }
+
+    #[test]
+    fn strip_block_comment() {
+        let s = r#"{"key": /* block */ 1}"#;
+        let out = strip(s);
+        assert!(!out.contains("block"));
+        assert!(out.contains("\"key\""));
+    }
+
+    #[test]
+    fn strip_trailing_comma_object() {
+        let s = r#"{"key": 1,}"#;
+        let out = strip(s);
+        // After stripping trailing comma, valid JSON
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid json after strip");
+        assert_eq!(parsed["key"], 1);
+    }
+
+    #[test]
+    fn strip_trailing_comma_array() {
+        let s = r#"[1, 2, 3,]"#;
+        let out = strip(s);
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+        assert_eq!(parsed.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn strip_preserves_url_slashes_in_string() {
+        let s = r#"{"url": "http://localhost:52773"}"#;
+        let out = strip(s);
+        assert!(
+            out.contains("http://localhost:52773"),
+            "url slashes preserved: {out}"
+        );
+    }
+
+    #[test]
+    fn strip_escaped_quote_in_string() {
+        let s = r#"{"key": "say \"hello\""}"#;
+        let out = strip(s);
+        assert!(out.contains(r#"say \"hello\""#));
+    }
+
+    #[test]
+    fn parse_settings_from_tmpfile_direct_host() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{
+            "objectscript.conn": {{
+                "active": true,
+                "host": "localhost",
+                "port": 52773,
+                "username": "_SYSTEM",
+                "password": "SYS",
+                "ns": "USER"
+            }}
+        }}"#
+        )
+        .unwrap();
+        let settings = parse_vscode_settings(f.path()).unwrap();
+        let conn = settings.objectscript_conn.unwrap();
+        assert_eq!(conn.host.as_deref(), Some("localhost"));
+        assert_eq!(conn.port, Some(52773));
+        assert_eq!(conn.ns.as_deref(), Some("USER"));
+    }
+
+    #[test]
+    fn parse_settings_from_tmpfile_with_comment() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{
+            // VS Code ObjectScript settings
+            "objectscript.conn": {{
+                "active": true,
+                "host": "myserver", // the server
+                "port": 52773,
+            }}
+        }}"#
+        )
+        .unwrap();
+        let settings = parse_vscode_settings(f.path()).unwrap();
+        let conn = settings.objectscript_conn.unwrap();
+        assert_eq!(conn.host.as_deref(), Some("myserver"));
+    }
+
+    #[test]
+    fn parse_settings_active_false() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"objectscript.conn": {{"active": false, "host": "h", "port": 1}}}}"#
+        )
+        .unwrap();
+        let settings = parse_vscode_settings(f.path()).unwrap();
+        let conn = settings.objectscript_conn.unwrap();
+        assert_eq!(conn.active, Some(false));
+    }
+
+    #[test]
+    fn parse_settings_nonexistent_file_returns_error() {
+        let result = parse_vscode_settings("/nonexistent/path/settings.json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_settings_empty_file_returns_default() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, "{{}}").unwrap();
+        let settings = parse_vscode_settings(f.path()).unwrap();
+        assert!(settings.objectscript_conn.is_none());
+    }
+
+    #[tokio::test]
+    async fn to_iris_connection_active_false_returns_none() {
+        let settings = VsCodeSettings {
+            objectscript_conn: Some(ObjectScriptConn {
+                active: Some(false),
+                host: Some("localhost".to_string()),
+                port: Some(52773),
+                username: None,
+                password: None,
+                ns: None,
+                server: None,
+            }),
+            intersystems_servers: None,
+        };
+        let conn = settings.to_iris_connection().await;
+        assert!(conn.is_none());
+    }
+
+    #[tokio::test]
+    async fn to_iris_connection_direct_host() {
+        let settings = VsCodeSettings {
+            objectscript_conn: Some(ObjectScriptConn {
+                active: Some(true),
+                host: Some("localhost".to_string()),
+                port: Some(52773),
+                username: Some("_SYSTEM".to_string()),
+                password: Some("SYS".to_string()),
+                ns: Some("USER".to_string()),
+                server: None,
+            }),
+            intersystems_servers: None,
+        };
+        let conn = settings.to_iris_connection().await;
+        assert!(conn.is_some());
+    }
+
+    #[tokio::test]
+    async fn to_iris_connection_no_conn_returns_none() {
+        let settings = VsCodeSettings {
+            objectscript_conn: None,
+            intersystems_servers: None,
+        };
+        let conn = settings.to_iris_connection().await;
+        assert!(conn.is_none());
+    }
+}

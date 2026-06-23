@@ -26,14 +26,18 @@ async fn load_from_github_no_slash_returns_error() {
 #[tokio::test]
 async fn load_from_github_error_does_not_add_skills() {
     let mut r = SkillRegistry::new();
-    let _ = r.load_from_github("nonexistent-owner-xyz/nonexistent-repo-xyz").await;
+    let _ = r
+        .load_from_github("nonexistent-owner-xyz/nonexistent-repo-xyz")
+        .await;
     assert!(r.list_skills().is_empty());
 }
 
 #[tokio::test]
 async fn load_from_github_error_does_not_add_kb_items() {
     let mut r = SkillRegistry::new();
-    let _ = r.load_from_github("nonexistent-owner-xyz/nonexistent-repo-xyz").await;
+    let _ = r
+        .load_from_github("nonexistent-owner-xyz/nonexistent-repo-xyz")
+        .await;
     assert!(r.list_kb_items().is_empty());
 }
 

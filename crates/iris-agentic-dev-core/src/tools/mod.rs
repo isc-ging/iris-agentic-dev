@@ -5253,8 +5253,7 @@ mod pure_fn_tests {
     }
     #[test]
     fn test_execute_params_defaults() {
-        let p: ExecuteParams =
-            serde_json::from_str(r#"{"code": "Write 1"}"#).unwrap();
+        let p: ExecuteParams = serde_json::from_str(r#"{"code": "Write 1"}"#).unwrap();
         assert_eq!(p.namespace, "USER");
         assert_eq!(p.code, "Write 1");
         assert!(p.translate_sql, "translate_sql defaults to true");
@@ -5286,8 +5285,7 @@ mod pure_fn_tests {
     }
     #[test]
     fn test_generate_test_params_defaults() {
-        let p: GenerateTestParams =
-            serde_json::from_str(r#"{"class_name": "Foo.Bar"}"#).unwrap();
+        let p: GenerateTestParams = serde_json::from_str(r#"{"class_name": "Foo.Bar"}"#).unwrap();
         assert_eq!(p.namespace, "USER");
         assert_eq!(p.class_name, "Foo.Bar");
     }
@@ -5399,10 +5397,8 @@ mod pure_fn_tests {
     #[test]
     fn test_replace_host_vars_repeated_var() {
         // If the same var appears twice it should be replaced twice
-        let result = replace_host_vars_with_positional(
-            "WHERE a = :x AND b = :x",
-            &["x".to_string()],
-        );
+        let result =
+            replace_host_vars_with_positional("WHERE a = :x AND b = :x", &["x".to_string()]);
         let question_count = result.matches('?').count();
         assert!(
             question_count >= 1,
@@ -5520,7 +5516,10 @@ mod pure_fn_tests {
         let p: QueryParams =
             serde_json::from_str(r#"{"query": "SELECT ?", "parameters": ["hello"]}"#).unwrap();
         assert_eq!(p.parameters.len(), 1);
-        assert_eq!(p.parameters[0], serde_json::Value::String("hello".to_string()));
+        assert_eq!(
+            p.parameters[0],
+            serde_json::Value::String("hello".to_string())
+        );
     }
 
     #[test]
@@ -5530,5 +5529,82 @@ mod pure_fn_tests {
         assert_eq!(p.id, Some("42".to_string()));
         assert_eq!(p.limit, Some(10));
         assert_eq!(p.offset, 5);
+    }
+}
+
+/// Test-only dispatch helper — call private IrisTools handler methods by tool name.
+#[cfg(any(test, feature = "testing"))]
+impl IrisTools {
+    /// Call a tool by name with JSON params. Returns the raw CallToolResult or an error string.
+    /// Only covers the tools most useful for coverage testing.
+    pub async fn call_for_test(
+        &self,
+        tool: &str,
+        params: serde_json::Value,
+    ) -> Result<rmcp::model::CallToolResult, String> {
+        use rmcp::handler::server::wrapper::Parameters;
+        macro_rules! dispatch {
+            ($name:expr, $ty:ty, $method:ident) => {
+                if tool == $name {
+                    let p: $ty = serde_json::from_value(params)
+                        .map_err(|e| format!("bad params for {}: {e}", $name))?;
+                    return self
+                        .$method(Parameters(p))
+                        .await
+                        .map_err(|e| format!("{e:?}"));
+                }
+            };
+        }
+        dispatch!("iris_compile", CompileParams, iris_compile);
+        dispatch!("iris_execute", ExecuteParams, iris_execute);
+        dispatch!("iris_test", TestParams, iris_test);
+        dispatch!("iris_query", QueryParams, iris_query);
+        dispatch!("iris_symbols", SymbolsParams, iris_symbols);
+        dispatch!("iris_symbols_local", SymbolsLocalParams, iris_symbols_local);
+        dispatch!("iris_get_log", GetLogParams, iris_get_log);
+        dispatch!("iris_doc", IrisDocParams, iris_doc);
+        dispatch!("iris_info", crate::tools::info::InfoParams, iris_info);
+        dispatch!(
+            "iris_search",
+            crate::tools::search::SearchParams,
+            iris_search
+        );
+        dispatch!(
+            "iris_source_control",
+            crate::tools::scm::ScmParams,
+            iris_source_control
+        );
+        // AnyParams-based dispatchers (admin, production, interop)
+        macro_rules! dispatch_any {
+            ($name:expr, $method:ident) => {
+                if tool == $name {
+                    return self
+                        .$method(Parameters(AnyParams(params)))
+                        .await
+                        .map_err(|e| format!("{e:?}"));
+                }
+            };
+        }
+        dispatch_any!("iris_admin", iris_admin);
+        dispatch_any!("iris_production", iris_production);
+        dispatch_any!("iris_interop_query", iris_interop_query);
+        dispatch_any!("iris_production_item", iris_production_item);
+        dispatch_any!("iris_credential_list", iris_credential_list);
+        dispatch_any!("iris_credential_manage", iris_credential_manage);
+        dispatch_any!("iris_lookup_manage", iris_lookup_manage);
+        dispatch_any!("iris_lookup_transfer", iris_lookup_transfer);
+        dispatch!(
+            "iris_generate",
+            crate::tools::info::GenerateParams,
+            iris_generate
+        );
+        dispatch!("iris_macro", crate::tools::info::MacroParams, iris_macro);
+        dispatch!("iris_debug", crate::tools::info::DebugParams, iris_debug);
+        dispatch!(
+            "iris_table_info",
+            crate::tools::info::TableInfoParams,
+            iris_table_info
+        );
+        Err(format!("unknown tool: {tool}"))
     }
 }

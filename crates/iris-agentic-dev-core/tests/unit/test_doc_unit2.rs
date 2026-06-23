@@ -13,15 +13,13 @@ fn doc_params_defaults() {
 
 #[test]
 fn doc_params_put_mode_lowercase() {
-    let p: IrisDocParams =
-        serde_json::from_str(r#"{"name":"x.cls","mode":"put"}"#).unwrap();
+    let p: IrisDocParams = serde_json::from_str(r#"{"name":"x.cls","mode":"put"}"#).unwrap();
     assert!(matches!(p.mode, DocMode::Put));
 }
 
 #[test]
 fn doc_params_action_alias_delete() {
-    let p: IrisDocParams =
-        serde_json::from_str(r#"{"name":"x.cls","action":"delete"}"#).unwrap();
+    let p: IrisDocParams = serde_json::from_str(r#"{"name":"x.cls","action":"delete"}"#).unwrap();
     assert!(matches!(p.mode, DocMode::Delete));
 }
 
@@ -34,14 +32,12 @@ fn doc_params_compile_flag() {
 
 #[test]
 fn doc_params_names_list() {
-    let p: IrisDocParams =
-        serde_json::from_str(r#"{"names":["a.cls","b.cls"]}"#).unwrap();
+    let p: IrisDocParams = serde_json::from_str(r#"{"names":["a.cls","b.cls"]}"#).unwrap();
     assert_eq!(p.names.len(), 2);
 }
 
 #[test]
 fn doc_mode_head_lowercase() {
-    let p: IrisDocParams =
-        serde_json::from_str(r#"{"name":"x.cls","mode":"head"}"#).unwrap();
+    let p: IrisDocParams = serde_json::from_str(r#"{"name":"x.cls","mode":"head"}"#).unwrap();
     assert!(matches!(p.mode, DocMode::Head));
 }
