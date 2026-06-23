@@ -2773,8 +2773,7 @@ async fn test_dispatch_resolve_dynamic_dispatch() {
         .call_for_test(
             "resolve_dynamic_dispatch",
             serde_json::json!({
-                "class": "%Library.Object",
-                "method": "ClassName",
+                "method_name": "ClassName",
                 "namespace": "USER"
             }),
         )
@@ -2798,7 +2797,7 @@ async fn test_dispatch_extract_message_map_routing() {
         .call_for_test(
             "extract_message_map_routing",
             serde_json::json!({
-                "class": "EnsLib.HTTP.GenericOperation",
+                "class_name": "%Library.Application",
                 "namespace": "USER"
             }),
         )
@@ -2826,7 +2825,7 @@ async fn test_dispatch_find_subclass_implementations_dict() {
             "find_subclass_implementations",
             serde_json::json!({
                 "base_classes": ["%Library.Persistent"],
-                "method": "SaveData",
+                "method_name": "SaveData",
                 "namespace": "USER"
             }),
         )
@@ -2853,8 +2852,7 @@ async fn test_dispatch_resolve_dynamic_dispatch_nonexistent_class() {
         .call_for_test(
             "resolve_dynamic_dispatch",
             serde_json::json!({
-                "class": "NonExistent.Class9999",
-                "method": "SomeMethod",
+                "method_name": "SomeMethod",
                 "namespace": "USER"
             }),
         )

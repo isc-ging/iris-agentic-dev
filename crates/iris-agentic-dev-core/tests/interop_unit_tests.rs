@@ -214,6 +214,39 @@ mod parse_status {
         let err = parse_status_response("ERROR:Something went wrong").unwrap_err();
         assert!(err.starts_with("INTEROP_ERROR"));
     }
+
+    #[test]
+    fn no_colon_returns_no_production() {
+        // splitn(2, ':') on "nocolon" gives len=1 — hits the parts.len() < 2 branch
+        let err = parse_status_response("nocolon").unwrap_err();
+        assert_eq!(err, "NO_PRODUCTION");
+    }
+
+    #[test]
+    fn empty_name_before_colon_returns_no_production() {
+        // ":5" splits to ["", "5"] — parts[0].is_empty() hits the branch
+        let err = parse_status_response(":5").unwrap_err();
+        assert_eq!(err, "NO_PRODUCTION");
+    }
+
+    #[test]
+    fn unknown_state_code_maps_to_unknown() {
+        // state_string for unknown codes should return something reasonable
+        let (name, code, state) = parse_status_response("Demo.Prod:99").unwrap();
+        assert_eq!(name, "Demo.Prod");
+        assert_eq!(code, 99);
+        // state should be non-empty (Unknown or some string)
+        assert!(!state.is_empty());
+    }
+
+    #[test]
+    fn invalid_code_defaults_to_zero() {
+        // When the code part is not a valid integer, parse().unwrap_or(0) applies
+        let (name, code, state) = parse_status_response("Demo.Prod:notanumber").unwrap();
+        assert_eq!(name, "Demo.Prod");
+        assert_eq!(code, 0);
+        assert!(!state.is_empty()); // state_string(0) should return something
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
