@@ -319,10 +319,6 @@ mod tests {
 
     #[test]
     fn get_returns_expired_for_ttl_exceeded() {
-        let mut store = LogStore::new(100, 60);
-        // Use TTL of 0 minutes so everything is immediately expired
-        let ttl_store = LogStore::new(100, 0);
-        // Insert manually with a past Instant
         let id = "expire-me";
         let entry = LogEntry {
             id: id.to_string(),
@@ -332,7 +328,6 @@ mod tests {
             full_result: serde_json::json!({}),
             total_count: 0,
         };
-        let _ = &mut store;
         let mut zero_ttl = LogStore::new(100, 0);
         zero_ttl.entries.push_back(entry);
         assert!(matches!(zero_ttl.get(id), GetResult::Expired));
