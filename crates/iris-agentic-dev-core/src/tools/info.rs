@@ -543,3 +543,99 @@ if rs.%Next() {{ write rs.%GetData(1),! }} else {{ write "error",! }}"#,
         Err(_) => serde_json::Value::Null,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_info_params_defaults() {
+        let p: InfoParams = serde_json::from_str(r#"{"what": "documents"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(p.doc_type.is_none());
+        assert!(p.name.is_none());
+        assert!(!p.inline);
+    }
+
+    #[test]
+    fn test_info_params_with_doc_type() {
+        let p: InfoParams =
+            serde_json::from_str(r#"{"what": "documents", "doc_type": "CLS"}"#).unwrap();
+        assert_eq!(p.doc_type.as_deref(), Some("CLS"));
+    }
+
+    #[test]
+    fn test_info_params_missing_what_fails() {
+        let r: Result<InfoParams, _> = serde_json::from_str(r#"{}"#);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_macro_params_defaults() {
+        let p: MacroParams = serde_json::from_str(r#"{"action": "list"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(p.name.is_none());
+        assert!(p.args.is_empty());
+    }
+
+    #[test]
+    fn test_macro_params_with_name_and_args() {
+        let p: MacroParams =
+            serde_json::from_str(r#"{"action": "expand", "name": "ISERR", "args": ["sc"]}"#)
+                .unwrap();
+        assert_eq!(p.action, "expand");
+        assert_eq!(p.name.as_deref(), Some("ISERR"));
+        assert_eq!(p.args, vec!["sc"]);
+    }
+
+    #[test]
+    fn test_debug_params_defaults() {
+        let p: DebugParams = serde_json::from_str(r#"{"action": "error_logs"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(p.error_string.is_none());
+        assert!(p.class_name.is_none());
+        assert!(p.limit > 0);
+    }
+
+    #[test]
+    fn test_generate_params_defaults() {
+        let p: GenerateParams =
+            serde_json::from_str(r#"{"description": "A patient class"}"#).unwrap();
+        assert_eq!(p.gen_type, "class");
+        assert_eq!(p.namespace, "USER");
+        assert!(p.class_name.is_none());
+    }
+
+    #[test]
+    fn test_generate_params_test_type() {
+        let p: GenerateParams = serde_json::from_str(
+            r#"{"description": "tests for Foo", "gen_type": "test", "class_name": "Foo.Bar"}"#,
+        )
+        .unwrap();
+        assert_eq!(p.gen_type, "test");
+        assert_eq!(p.class_name.as_deref(), Some("Foo.Bar"));
+    }
+
+    #[test]
+    fn test_table_info_params_defaults() {
+        let p: TableInfoParams =
+            serde_json::from_str(r#"{"table": "SQLUser.MyTable"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(!p.include_row_count);
+    }
+
+    #[test]
+    fn test_table_info_params_with_row_count() {
+        let p: TableInfoParams = serde_json::from_str(
+            r#"{"table": "Foo.Orders", "include_row_count": true}"#,
+        )
+        .unwrap();
+        assert!(p.include_row_count);
+    }
+
+    #[test]
+    fn test_table_info_params_missing_table_fails() {
+        let r: Result<TableInfoParams, _> = serde_json::from_str(r#"{}"#);
+        assert!(r.is_err());
+    }
+}

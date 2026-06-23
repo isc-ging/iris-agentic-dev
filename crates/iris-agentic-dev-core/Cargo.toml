@@ -92,6 +92,10 @@ name = "test_doc_params"
 path = "tests/unit/test_doc_params.rs"
 
 [[test]]
+name = "test_doc_unit2"
+path = "tests/unit/test_doc_unit2.rs"
+
+[[test]]
 name = "test_connection_fixes"
 path = "tests/unit/test_connection_fixes.rs"
 
@@ -202,3 +206,7 @@ path = "tests/unit/test_sql_translate.rs"
 [[test]]
 name = "test_sql_translate_e2e"
 path = "tests/integration/test_sql_translate_e2e.rs"
+
+[[test]]
+name = "test_skills_mod_unit"
+path = "tests/unit/test_skills_mod_unit.rs"

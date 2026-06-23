@@ -227,3 +227,126 @@ impl ResolveLock {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifest::schema::DependencySpec;
+
+    fn dep_github(github: &str) -> DependencySpec {
+        DependencySpec {
+            version: "0.1.0".to_string(),
+            git: None,
+            github: Some(github.to_string()),
+            openexchange: None,
+            repository: None,
+        }
+    }
+
+    fn dep_git(url: &str) -> DependencySpec {
+        DependencySpec {
+            version: "0.1.0".to_string(),
+            git: Some(url.to_string()),
+            github: None,
+            openexchange: None,
+            repository: None,
+        }
+    }
+
+    fn dep_local(path: &str) -> DependencySpec {
+        DependencySpec {
+            version: "0.1.0".to_string(),
+            git: None,
+            github: None,
+            openexchange: None,
+            repository: Some(path.to_string()),
+        }
+    }
+
+    fn dep_ox(id: &str) -> DependencySpec {
+        DependencySpec {
+            version: "0.1.0".to_string(),
+            git: None,
+            github: None,
+            openexchange: Some(id.to_string()),
+            repository: None,
+        }
+    }
+
+    fn dep_no_source() -> DependencySpec {
+        DependencySpec {
+            version: "0.1.0".to_string(),
+            git: None,
+            github: None,
+            openexchange: None,
+            repository: None,
+        }
+    }
+
+    #[test]
+    fn test_dep_to_source_github() {
+        let dep = dep_github("owner/repo");
+        let source = dep_to_source("pkg", &dep).unwrap();
+        assert!(matches!(source, ResolvedSource::GitHub { .. }));
+        if let ResolvedSource::GitHub { owner, repo } = source {
+            assert_eq!(owner, "owner");
+            assert_eq!(repo, "repo");
+        }
+    }
+
+    #[test]
+    fn test_dep_to_source_git() {
+        let dep = dep_git("https://github.com/x/y.git");
+        let source = dep_to_source("pkg", &dep).unwrap();
+        assert!(matches!(source, ResolvedSource::Git(_)));
+    }
+
+    #[test]
+    fn test_dep_to_source_local() {
+        let dep = dep_local("/path/to/pkg");
+        let source = dep_to_source("pkg", &dep).unwrap();
+        assert!(matches!(source, ResolvedSource::Local(_)));
+    }
+
+    #[test]
+    fn test_dep_to_source_openexchange() {
+        let dep = dep_ox("iris-json-1.0.0");
+        let source = dep_to_source("pkg", &dep).unwrap();
+        assert!(matches!(source, ResolvedSource::OpenExchange(_)));
+    }
+
+    #[test]
+    fn test_dep_to_source_no_source_errors() {
+        let dep = dep_no_source();
+        let result = dep_to_source("pkg", &dep);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_to_lock_github_url_format() {
+        let pkg = ResolvedPackage {
+            name: "mypkg".to_string(),
+            version: Version::parse("1.2.3").unwrap(),
+            source: ResolvedSource::GitHub {
+                owner: "alice".to_string(),
+                repo: "myrepo".to_string(),
+            },
+        };
+        let resolve = Resolve { packages: vec![pkg] };
+        let lock = resolve.to_lock();
+        assert_eq!(lock.packages[0].repository, "https://github.com/alice/myrepo");
+        assert_eq!(lock.packages[0].version, "1.2.3");
+    }
+
+    #[test]
+    fn test_to_lock_openexchange_url_format() {
+        let pkg = ResolvedPackage {
+            name: "mypkg".to_string(),
+            version: Version::parse("0.1.0").unwrap(),
+            source: ResolvedSource::OpenExchange("some-pkg-id".to_string()),
+        };
+        let resolve = Resolve { packages: vec![pkg] };
+        let lock = resolve.to_lock();
+        assert_eq!(lock.packages[0].repository, "openexchange:some-pkg-id");
+    }
+}

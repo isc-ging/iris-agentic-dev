@@ -597,12 +597,89 @@ mod tests {
 
     #[test]
     fn test_strip_storage_blocks_inline_brace_strips_content() {
-        // Storage block with { on same line — content including nested braces is stripped
         let cls =
             "Class Foo {\nStorage Default {\n<Data>\n<Value>{ nested }</Value>\n</Data>\n}\n}";
         let (stripped, flag) = strip_storage_blocks(cls);
         assert!(flag);
         assert!(!stripped.contains("Storage Default"));
         assert!(!stripped.contains("nested"));
+    }
+
+    // ── IrisDocParams serde ───────────────────────────────────────────────────
+    #[test]
+    fn test_iris_doc_params_defaults() {
+        let p: IrisDocParams = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(p.name.is_none());
+        assert!(p.names.is_empty());
+        assert!(p.content.is_none());
+        assert!(!p.compile);
+    }
+
+    #[test]
+    fn test_iris_doc_params_get_mode_default() {
+        let p: IrisDocParams = serde_json::from_str(r#"{"name": "Foo.cls"}"#).unwrap();
+        assert!(matches!(p.mode, DocMode::Get));
+    }
+
+    #[test]
+    fn test_iris_doc_params_put_mode() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"mode": "put", "name": "Foo.cls", "content": "Class Foo {}"}"#)
+                .unwrap();
+        assert!(matches!(p.mode, DocMode::Put));
+        assert_eq!(p.content.as_deref(), Some("Class Foo {}"));
+    }
+
+    #[test]
+    fn test_iris_doc_params_mode_alias_action() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"action": "delete", "name": "Foo.cls"}"#).unwrap();
+        assert!(matches!(p.mode, DocMode::Delete));
+    }
+
+    #[test]
+    fn test_iris_doc_params_with_compile() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"mode": "put", "name": "Foo.cls", "compile": true}"#)
+                .unwrap();
+        assert!(p.compile);
+    }
+
+    #[test]
+    fn test_iris_doc_params_batch_names() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"names": ["Foo.cls", "Bar.cls"]}"#).unwrap();
+        assert_eq!(p.names.len(), 2);
+    }
+
+    // ── http_err_json ─────────────────────────────────────────────────────────
+    #[test]
+    fn test_http_err_json_404_returns_not_found() {
+        let result = http_err_json(reqwest::StatusCode::NOT_FOUND, "").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        assert!(text.contains("NOT_FOUND"), "{text}");
+    }
+
+    #[test]
+    fn test_http_err_json_401_returns_auth_error() {
+        let result = http_err_json(reqwest::StatusCode::UNAUTHORIZED, "").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        assert!(text.contains("AUTH_ERROR"), "{text}");
+    }
+
+    #[test]
+    fn test_http_err_json_500_returns_server_error() {
+        let result = http_err_json(reqwest::StatusCode::INTERNAL_SERVER_ERROR, "boom").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        assert!(text.contains("SERVER_ERROR"), "{text}");
+        assert!(text.contains("boom"), "{text}");
+    }
+
+    #[test]
+    fn test_http_err_json_409_returns_conflict() {
+        let result = http_err_json(reqwest::StatusCode::CONFLICT, "locked").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        assert!(text.contains("CONFLICT"), "{text}");
     }
 }

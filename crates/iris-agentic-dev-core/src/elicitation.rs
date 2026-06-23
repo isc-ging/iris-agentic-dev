@@ -92,3 +92,69 @@ impl ElicitationStore {
         count
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_insert_returns_uuid() {
+        let store = ElicitationStore::new();
+        let id = store.insert("Foo.cls", ElicitationAction::Put, None, None, "USER");
+        assert!(!id.is_empty());
+    }
+
+    #[test]
+    fn test_lookup_finds_inserted() {
+        let store = ElicitationStore::new();
+        let id = store.insert("Foo.cls", ElicitationAction::Put, Some("content".into()), None, "USER");
+        let pending = store.lookup(&id).expect("should find it");
+        assert_eq!(pending.document, "Foo.cls");
+        assert_eq!(pending.namespace, "USER");
+        assert_eq!(pending.content.as_deref(), Some("content"));
+    }
+
+    #[test]
+    fn test_lookup_missing_returns_none() {
+        let store = ElicitationStore::new();
+        assert!(store.lookup("nonexistent-id").is_none());
+    }
+
+    #[test]
+    fn test_clear_removes_entry() {
+        let store = ElicitationStore::new();
+        let id = store.insert("Bar.cls", ElicitationAction::ScmExecute, None, Some("CheckOut".into()), "USER");
+        store.clear(&id);
+        assert!(store.lookup(&id).is_none());
+    }
+
+    #[test]
+    fn test_sweep_empty_store() {
+        let store = ElicitationStore::new();
+        assert_eq!(store.sweep(), 0);
+    }
+
+    #[test]
+    fn test_sweep_removes_nothing_fresh() {
+        let store = ElicitationStore::new();
+        store.insert("A.cls", ElicitationAction::Put, None, None, "USER");
+        store.insert("B.cls", ElicitationAction::Put, None, None, "USER");
+        assert_eq!(store.sweep(), 0, "fresh entries should not be swept");
+    }
+
+    #[test]
+    fn test_scm_execute_action_fields() {
+        let store = ElicitationStore::new();
+        let id = store.insert(
+            "App.cls",
+            ElicitationAction::ScmExecute,
+            None,
+            Some("CheckIn".into()),
+            "MYNS",
+        );
+        let p = store.lookup(&id).unwrap();
+        assert!(matches!(p.action, ElicitationAction::ScmExecute));
+        assert_eq!(p.scm_action_id.as_deref(), Some("CheckIn"));
+        assert_eq!(p.namespace, "MYNS");
+    }
+}

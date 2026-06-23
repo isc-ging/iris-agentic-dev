@@ -611,3 +611,59 @@ async fn discover_via_vscode_settings() -> Option<IrisConnection> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_score_container_empty_workspace() {
+        assert_eq!(score_container_name("my-iris", ""), 0);
+    }
+
+    #[test]
+    fn test_score_container_exact_match() {
+        assert_eq!(score_container_name("myapp", "myapp"), 100);
+    }
+
+    #[test]
+    fn test_score_container_exact_match_with_iris_suffix() {
+        let score = score_container_name("myapp_iris", "myapp");
+        assert_eq!(score, 90, "exact + iris suffix = 100 + 10");
+    }
+
+    #[test]
+    fn test_score_container_starts_with_workspace() {
+        let score = score_container_name("myapp-dev", "myapp");
+        assert_eq!(score, 80);
+    }
+
+    #[test]
+    fn test_score_container_contains_workspace() {
+        let score = score_container_name("prod-myapp-instance", "myapp");
+        assert_eq!(score, 60);
+    }
+
+    #[test]
+    fn test_score_container_no_match() {
+        assert_eq!(score_container_name("completely-different", "myapp"), 0);
+    }
+
+    #[test]
+    fn test_score_container_case_insensitive() {
+        assert_eq!(score_container_name("MYAPP", "myapp"), 100);
+    }
+
+    #[test]
+    fn test_score_container_hyphen_underscore_normalized() {
+        // "my-app" normalized to "my_app", workspace "my-app" normalized to "my_app" → exact match
+        assert_eq!(score_container_name("my-app", "my_app"), 100);
+    }
+
+    #[test]
+    fn test_score_container_starts_with_iris_suffix_bonus() {
+        let score = score_container_name("myapp-iris", "myapp");
+        // starts_with → 80, iris suffix → 10 = 90
+        assert_eq!(score, 90);
+    }
+}

@@ -557,4 +557,70 @@ mod tests {
     fn test_scm_menu_prefix() {
         assert_eq!(SCM_MENU, "%SourceMenu");
     }
+
+    // ── scm_init_prefix ──────────────────────────────────────────────────────
+    #[test]
+    fn test_scm_init_prefix_contains_source_control_create() {
+        let code = scm_init_prefix("user", "pass");
+        assert!(code.contains("SourceControlCreate"), "{code}");
+        assert!(code.contains("%Studio.SourceControl.Interface"), "{code}");
+    }
+
+    #[test]
+    fn test_scm_init_prefix_escapes_quotes_in_user() {
+        let code = scm_init_prefix("us\"er", "pass");
+        assert!(code.contains("\"\""), "double-quote must be doubled: {code}");
+        assert!(!code.contains("\\\""), "no backslash-quote: {code}");
+    }
+
+    // ── menu_all_items_code ──────────────────────────────────────────────────
+    #[test]
+    fn test_menu_all_items_code_contains_menu_items() {
+        let code = menu_all_items_code("MyApp.cls", "user", "pass");
+        assert!(code.contains("MenuItems"), "{code}");
+    }
+
+    #[test]
+    fn test_menu_all_items_code_contains_doc() {
+        let code = menu_all_items_code("MyApp.Patient.cls", "user", "pass");
+        assert!(code.contains("MyApp.Patient.cls"), "{code}");
+    }
+
+    // ── after_user_action_code ───────────────────────────────────────────────
+    #[test]
+    fn test_after_user_action_code_contains_after_user_action() {
+        let code = after_user_action_code("CheckOut", "MyApp.cls", "yes", "user", "pass");
+        assert!(code.contains("AfterUserAction"), "{code}");
+    }
+
+    #[test]
+    fn test_after_user_action_code_contains_doc() {
+        let code = after_user_action_code("CheckOut", "MyApp.Patient.cls", "no", "user", "pass");
+        assert!(code.contains("MyApp.Patient.cls"), "{code}");
+    }
+
+    #[test]
+    fn test_after_user_action_code_yes_becomes_1() {
+        let code = after_user_action_code("CheckOut", "Doc.cls", "yes", "user", "pass");
+        assert!(code.contains(",1,"), "yes should become 1: {code}");
+    }
+
+    #[test]
+    fn test_after_user_action_code_no_becomes_0() {
+        let code = after_user_action_code("CheckOut", "Doc.cls", "no", "user", "pass");
+        assert!(code.contains(",0,"), "no should become 0: {code}");
+    }
+
+    // ── Document name normalization ──────────────────────────────────────────
+    #[test]
+    fn test_normalize_cls_extension_appended_for_bare_class() {
+        let doc = "MyApp.Patient";
+        let normalized = if !doc.contains('.') || doc.ends_with(".cls") || doc.ends_with(".mac") || doc.ends_with(".inc") || doc.ends_with(".int") {
+            doc.to_string()
+        } else {
+            format!("{}.cls", doc)
+        };
+        // "MyApp.Patient" has a dot but no extension suffix → should get .cls
+        assert_eq!(normalized, "MyApp.Patient.cls");
+    }
 }

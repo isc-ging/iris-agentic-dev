@@ -226,14 +226,51 @@ mod tests {
         assert_eq!(p.query, "test");
     }
 
-    // ── parse_search_results ──────────────────────────────────────────────────
-    // parse_search_results is private — test indirectly via known behaviour
     #[test]
     fn test_search_params_namespace_required_field() {
-        // namespace has no serde default in search.rs — it's required or has default
         let result: Result<SearchParams, _> =
             serde_json::from_str(r#"{"query":"x","namespace":"MYNS"}"#);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().namespace, "MYNS");
+    }
+
+    #[test]
+    fn test_search_params_defaults() {
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "Ens.*"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(!p.regex);
+        assert!(!p.case_sensitive);
+        assert!(p.category.is_none());
+        assert!(p.documents.is_empty());
+        assert!(!p.inline);
+    }
+
+    #[test]
+    fn test_search_params_with_category() {
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "x", "category": "CLS"}"#).unwrap();
+        assert_eq!(p.category.as_deref(), Some("CLS"));
+    }
+
+    #[test]
+    fn test_search_params_regex_flag() {
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "Ens\\..*", "regex": true}"#).unwrap();
+        assert!(p.regex);
+    }
+
+    #[test]
+    fn test_search_params_documents_list() {
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "x", "documents": ["Foo.*.cls", "Bar.*.cls"]}"#)
+                .unwrap();
+        assert_eq!(p.documents.len(), 2);
+    }
+
+    #[test]
+    fn test_search_params_missing_query_fails() {
+        let r: Result<SearchParams, _> = serde_json::from_str(r#"{}"#);
+        assert!(r.is_err(), "query is required");
     }
 }

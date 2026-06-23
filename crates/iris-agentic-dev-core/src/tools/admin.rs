@@ -716,3 +716,70 @@ If $$$ISERR(tSC2) {{ Write "ERROR:INTEROP_ERROR:"_$System.Status.GetErrorText(tS
         Err(e) => err_json("IRIS_UNREACHABLE", &e.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_admin_write_allowed_default_false() {
+        std::env::remove_var("IRIS_ADMIN_TOOLS");
+        assert!(!admin_write_allowed());
+    }
+
+    #[test]
+    fn test_admin_write_allowed_one() {
+        std::env::set_var("IRIS_ADMIN_TOOLS", "1");
+        let result = admin_write_allowed();
+        std::env::remove_var("IRIS_ADMIN_TOOLS");
+        assert!(result);
+    }
+
+    #[test]
+    fn test_admin_write_allowed_true_string() {
+        std::env::set_var("IRIS_ADMIN_TOOLS", "true");
+        let result = admin_write_allowed();
+        std::env::remove_var("IRIS_ADMIN_TOOLS");
+        assert!(result);
+    }
+
+    #[test]
+    fn test_admin_write_allowed_true_upper() {
+        std::env::set_var("IRIS_ADMIN_TOOLS", "TRUE");
+        let result = admin_write_allowed();
+        std::env::remove_var("IRIS_ADMIN_TOOLS");
+        assert!(result);
+    }
+
+    #[test]
+    fn test_admin_write_allowed_false_string() {
+        std::env::set_var("IRIS_ADMIN_TOOLS", "false");
+        let result = admin_write_allowed();
+        std::env::remove_var("IRIS_ADMIN_TOOLS");
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_admin_write_allowed_zero() {
+        std::env::set_var("IRIS_ADMIN_TOOLS", "0");
+        let result = admin_write_allowed();
+        std::env::remove_var("IRIS_ADMIN_TOOLS");
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_ok_json_shape() {
+        let v = serde_json::json!({"success": true, "count": 3});
+        let result = ok_json(v).unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        assert!(text.contains("success"));
+    }
+
+    #[test]
+    fn test_err_json_shape() {
+        let result = err_json("NOT_FOUND", "Resource not found").unwrap();
+        let text = result.content[0].raw.as_text().unwrap().text.clone();
+        assert!(text.contains("NOT_FOUND"));
+        assert!(text.contains("Resource not found"));
+    }
+}

@@ -163,3 +163,59 @@ fn extract_h1_title(content: &str) -> Option<String> {
         .find(|l| l.starts_with("# "))
         .map(|l| l.trim_start_matches("# ").to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_frontmatter_field_found() {
+        let md = "---\nname: my-skill\ndescription: does stuff\n---\n# Title";
+        assert_eq!(
+            extract_frontmatter_field(md, "name"),
+            Some("my-skill".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_frontmatter_field_not_found() {
+        let md = "---\nname: skill\n---\n# Title";
+        assert!(extract_frontmatter_field(md, "version").is_none());
+    }
+
+    #[test]
+    fn test_extract_frontmatter_field_no_frontmatter() {
+        let md = "# Title\n\nSome content";
+        assert!(extract_frontmatter_field(md, "name").is_none());
+    }
+
+    #[test]
+    fn test_extract_frontmatter_field_quoted_value() {
+        let md = "---\ndescription: \"quoted value\"\n---";
+        assert_eq!(
+            extract_frontmatter_field(md, "description"),
+            Some("quoted value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_h1_title_found() {
+        let md = "---\nname: x\n---\n# My Skill Title\n\nContent here.";
+        assert_eq!(
+            extract_h1_title(md),
+            Some("My Skill Title".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_h1_title_not_found() {
+        let md = "No h1 here\n## h2 only";
+        assert!(extract_h1_title(md).is_none());
+    }
+
+    #[test]
+    fn test_extract_h1_title_ignores_h2() {
+        let md = "## Not h1\n# Actual h1";
+        assert_eq!(extract_h1_title(md), Some("Actual h1".to_string()));
+    }
+}

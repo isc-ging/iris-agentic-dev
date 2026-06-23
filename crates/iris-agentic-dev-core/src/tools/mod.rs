@@ -4992,7 +4992,6 @@ mod schema_normalization_tests {
     // ── check_config field ordering ───────────────────────────────────────────
     #[test]
     fn check_config_connection_source_before_host() {
-        // Verify connection_source appears before host in the JSON key order.
         // serde_json::json! preserves insertion order — this test guards that ordering.
         let sample = serde_json::json!({
             "connected": true,
@@ -5012,7 +5011,7 @@ mod schema_normalization_tests {
         let host_pos = serialized.find("\"host\"").unwrap();
         assert!(
             conn_src_pos < host_pos,
-            "connection_source must appear before host in check_config output (got positions {conn_src_pos} vs {host_pos})"
+            "connection_source must appear before host in check_config output"
         );
     }
 
@@ -5029,7 +5028,285 @@ mod schema_normalization_tests {
         );
         assert!(
             !DOCKER_REQUIRED_HINT.to_lowercase().contains("docker run"),
-            "DOCKER_REQUIRED hint must not suggest 'docker run' (guides non-Docker users)"
+            "DOCKER_REQUIRED hint must not suggest 'docker run'"
         );
+    }
+}
+
+#[cfg(test)]
+mod pure_fn_tests {
+    use super::*;
+
+    // ── split_csv ─────────────────────────────────────────────────────────────
+    #[test]
+    fn test_split_csv_empty() {
+        assert_eq!(split_csv(""), Vec::<String>::new());
+    }
+    #[test]
+    fn test_split_csv_single() {
+        assert_eq!(split_csv(":name"), vec![":name"]);
+    }
+    #[test]
+    fn test_split_csv_multiple() {
+        assert_eq!(split_csv(":a, :b, :c"), vec![":a", ":b", ":c"]);
+    }
+    #[test]
+    fn test_split_csv_respects_parens() {
+        let result = split_csv("func(:a, :b), :c");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "func(:a, :b)");
+        assert_eq!(result[1], ":c");
+    }
+
+    // ── find_keyword_pos ─────────────────────────────────────────────────────
+    #[test]
+    fn test_find_keyword_pos_found() {
+        assert!(find_keyword_pos("SELECT :x FROM t", "FROM").is_some());
+    }
+    #[test]
+    fn test_find_keyword_pos_not_found() {
+        assert!(find_keyword_pos("SELECT :x", "FROM").is_none());
+    }
+    #[test]
+    fn test_find_keyword_pos_case_insensitive() {
+        assert!(find_keyword_pos("select :x from t", "FROM").is_some());
+    }
+
+    // ── extract_where_params ──────────────────────────────────────────────────
+    #[test]
+    fn test_extract_where_params_none() {
+        assert_eq!(extract_where_params("FROM t"), Vec::<String>::new());
+    }
+    #[test]
+    fn test_extract_where_params_single() {
+        let p = extract_where_params("WHERE id = :id");
+        assert_eq!(p, vec!["id"]);
+    }
+    #[test]
+    fn test_extract_where_params_multiple() {
+        let p = extract_where_params("WHERE a = :a AND b = :b");
+        assert_eq!(p, vec!["a", "b"]);
+    }
+    #[test]
+    fn test_extract_where_params_no_dupe() {
+        let p = extract_where_params(":x AND :x");
+        assert_eq!(p, vec!["x"]);
+    }
+
+    // ── replace_host_vars_with_positional ────────────────────────────────────
+    #[test]
+    fn test_replace_host_vars_single() {
+        let result = replace_host_vars_with_positional("WHERE id = :id", &["id".to_string()]);
+        assert_eq!(result, "WHERE id = ?");
+    }
+    #[test]
+    fn test_replace_host_vars_multiple() {
+        let result = replace_host_vars_with_positional(
+            "WHERE a = :a AND b = :b",
+            &["a".to_string(), "b".to_string()],
+        );
+        assert_eq!(result, "WHERE a = ? AND b = ?");
+    }
+
+    // ── split_host_vars_from_rest ────────────────────────────────────────────
+    #[test]
+    fn test_split_host_vars_with_from() {
+        let (vars, rest) = split_host_vars_from_rest(":name, :age FROM users WHERE id = :id");
+        assert!(vars.contains(":name"));
+        assert!(rest.starts_with("FROM"));
+    }
+    #[test]
+    fn test_split_host_vars_no_from() {
+        let (vars, rest) = split_host_vars_from_rest(":name");
+        assert_eq!(vars, ":name");
+        assert!(rest.is_empty());
+    }
+
+    // ── translate_sql_macros ──────────────────────────────────────────────────
+    #[test]
+    fn test_translate_sql_macros_no_macro_passthrough() {
+        let code = "Write \"hello\"";
+        let result = translate_sql_macros(code);
+        assert!(!result.found);
+        assert_eq!(result.translated_code, code);
+        assert!(result.warnings.is_empty());
+    }
+    #[test]
+    fn test_translate_sql_macros_select_into() {
+        let code = "&sql(SELECT Name INTO :name FROM Sample.Person WHERE ID = :id)";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+        assert!(!result.translated_code.contains("&sql("));
+        assert!(result.warnings.is_empty());
+    }
+    #[test]
+    fn test_translate_sql_macros_insert() {
+        let code = "&sql(INSERT INTO t (a) VALUES (:a))";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+        assert!(!result.translated_code.contains("&sql(INSERT"));
+    }
+    #[test]
+    fn test_translate_sql_macros_update() {
+        let code = "&sql(UPDATE t SET a = :a WHERE id = :id)";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+    }
+    #[test]
+    fn test_translate_sql_macros_delete() {
+        let code = "&sql(DELETE FROM t WHERE id = :id)";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+    }
+    #[test]
+    fn test_translate_sql_macros_call_unsupported() {
+        let code = "&sql(CALL MyProc(:a, :b))";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+        assert!(!result.warnings.is_empty());
+        assert!(result.translated_code.contains("&sql(CALL"));
+    }
+    #[test]
+    fn test_translate_sql_macros_select_no_into() {
+        let code = "&sql(SELECT Name FROM Sample.Person WHERE ID = 1)";
+        let result = translate_sql_macros(code);
+        assert!(result.found);
+        assert!(!result.translated_code.contains("&sql("));
+    }
+
+    // ── default_execute_timeout ───────────────────────────────────────────────
+    #[test]
+    fn test_default_execute_timeout_default_value() {
+        std::env::remove_var("OBJECTSCRIPT_TEST_TIMEOUT");
+        let t = default_execute_timeout();
+        assert_eq!(t, 120, "default timeout must be 120s");
+    }
+    #[test]
+    fn test_default_execute_timeout_env_override() {
+        std::env::set_var("OBJECTSCRIPT_TEST_TIMEOUT", "60");
+        let t = default_execute_timeout();
+        std::env::remove_var("OBJECTSCRIPT_TEST_TIMEOUT");
+        assert_eq!(t, 60);
+    }
+
+    // ── map_status_int ────────────────────────────────────────────────────────
+    #[test]
+    fn test_map_status_int_zero_no_action() {
+        assert_eq!(map_status_int(0, ""), "failed");
+    }
+    #[test]
+    fn test_map_status_int_one_is_passed() {
+        assert_eq!(map_status_int(1, ""), "passed");
+    }
+    #[test]
+    fn test_map_status_int_two_with_action_is_error() {
+        assert_eq!(map_status_int(2, "SomeMethod"), "error");
+    }
+    #[test]
+    fn test_map_status_int_two_no_action_is_failed() {
+        assert_eq!(map_status_int(2, ""), "failed");
+    }
+
+    // ── build_test_detail ─────────────────────────────────────────────────────
+    #[test]
+    fn test_build_test_detail_empty() {
+        let result = build_test_detail(&[], &[]);
+        let arr = result["test_suites"].as_array().unwrap();
+        assert_eq!(arr.len(), 0);
+    }
+    #[test]
+    fn test_build_test_detail_one_suite_one_method() {
+        let suites = vec![SuiteRow {
+            id: "1".to_string(),
+            name: "MyTests".to_string(),
+            status: 1,
+            duration_ms: Some(100.0),
+        }];
+        let methods = vec![MethodRow {
+            suite_id: "1".to_string(),
+            name: "TestFoo".to_string(),
+            class_name: "MyTests".to_string(),
+            status: 1,
+            duration_ms: Some(50.0),
+            error_description: "".to_string(),
+            error_action: "".to_string(),
+        }];
+        let result = build_test_detail(&suites, &methods);
+        let arr = result["test_suites"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "MyTests");
+    }
+
+    // ── Param struct serde defaults ───────────────────────────────────────────
+    #[test]
+    fn test_compile_params_defaults() {
+        let p: CompileParams = serde_json::from_str(r#"{"target": "Foo.Bar"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert_eq!(p.target, "Foo.Bar");
+        assert!(!p.force_writable);
+    }
+    #[test]
+    fn test_test_params_defaults() {
+        let p: TestParams = serde_json::from_str(r#"{"pattern": "MyTests.*"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert_eq!(p.pattern, "MyTests.*");
+    }
+    #[test]
+    fn test_execute_params_defaults() {
+        let p: ExecuteParams =
+            serde_json::from_str(r#"{"code": "Write 1"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert_eq!(p.code, "Write 1");
+        assert!(p.translate_sql, "translate_sql defaults to true");
+        assert!(!p.confirmed);
+    }
+    #[test]
+    fn test_execute_params_translate_sql_false() {
+        let p: ExecuteParams =
+            serde_json::from_str(r#"{"code": "x", "translate_sql": false}"#).unwrap();
+        assert!(!p.translate_sql);
+    }
+    #[test]
+    fn test_symbols_params_defaults() {
+        let p: SymbolsParams = serde_json::from_str(r#"{"query": "Ens.*"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+    }
+    #[test]
+    fn test_introspect_params_defaults() {
+        let p: IntrospectParams =
+            serde_json::from_str(r#"{"class_name": "Ens.Production"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+    }
+    #[test]
+    fn test_generate_class_params_defaults() {
+        let p: GenerateClassParams =
+            serde_json::from_str(r#"{"description": "A simple class"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(!p.overwrite);
+    }
+    #[test]
+    fn test_generate_test_params_defaults() {
+        let p: GenerateTestParams =
+            serde_json::from_str(r#"{"class_name": "Foo.Bar"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert_eq!(p.class_name, "Foo.Bar");
+    }
+    #[test]
+    fn test_query_params_defaults() {
+        let p: QueryParams = serde_json::from_str(r#"{"query": "SELECT 1"}"#).unwrap();
+        assert_eq!(p.namespace, "USER");
+        assert!(p.parameters.is_empty());
+    }
+    #[test]
+    fn test_get_log_params_defaults() {
+        let p: GetLogParams = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(p.id.is_none());
+        assert!(p.limit.is_none());
+        assert_eq!(p.offset, 0);
+    }
+    #[test]
+    fn test_error_logs_params_defaults() {
+        let p: ErrorLogsParams = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(p.max_entries > 0);
     }
 }

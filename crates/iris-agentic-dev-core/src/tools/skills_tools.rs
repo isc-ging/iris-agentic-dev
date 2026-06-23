@@ -393,3 +393,80 @@ pub async fn handle_agent_info(
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skill_params_action_required() {
+        let p: SkillParams = serde_json::from_str(r#"{"action": "list"}"#).unwrap();
+        assert_eq!(p.action, "list");
+        assert!(p.name.is_none());
+        assert!(p.query.is_none());
+    }
+
+    #[test]
+    fn test_skill_params_with_name() {
+        let p: SkillParams =
+            serde_json::from_str(r#"{"action": "describe", "name": "iris-compile"}"#).unwrap();
+        assert_eq!(p.action, "describe");
+        assert_eq!(p.name.as_deref(), Some("iris-compile"));
+    }
+
+    #[test]
+    fn test_skill_params_with_query() {
+        let p: SkillParams =
+            serde_json::from_str(r#"{"action": "search", "query": "compile class"}"#).unwrap();
+        assert_eq!(p.query.as_deref(), Some("compile class"));
+    }
+
+    #[test]
+    fn test_skill_params_missing_action_fails() {
+        let r: Result<SkillParams, _> = serde_json::from_str(r#"{"name": "foo"}"#);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_skill_community_params_action_required() {
+        let p: SkillCommunityParams =
+            serde_json::from_str(r#"{"action": "list"}"#).unwrap();
+        assert_eq!(p.action, "list");
+        assert!(p.package.is_none());
+    }
+
+    #[test]
+    fn test_skill_community_params_with_package() {
+        let p: SkillCommunityParams =
+            serde_json::from_str(r#"{"action": "install", "package": "iris-rag"}"#).unwrap();
+        assert_eq!(p.package.as_deref(), Some("iris-rag"));
+    }
+
+    #[test]
+    fn test_kb_params_defaults() {
+        let p: KbParams = serde_json::from_str(r#"{"action": "recall", "query": "hello"}"#).unwrap();
+        assert_eq!(p.top_k, 5);
+        assert!(p.path.is_none());
+    }
+
+    #[test]
+    fn test_kb_params_custom_top_k() {
+        let p: KbParams =
+            serde_json::from_str(r#"{"action": "recall", "query": "q", "top_k": 10}"#).unwrap();
+        assert_eq!(p.top_k, 10);
+    }
+
+    #[test]
+    fn test_agent_info_params_defaults() {
+        let p: AgentInfoParams = serde_json::from_str(r#"{"what": "stats"}"#).unwrap();
+        assert_eq!(p.what, "stats");
+        assert_eq!(p.limit, 20);
+    }
+
+    #[test]
+    fn test_agent_info_params_custom_limit() {
+        let p: AgentInfoParams =
+            serde_json::from_str(r#"{"what": "history", "limit": 50}"#).unwrap();
+        assert_eq!(p.limit, 50);
+    }
+}

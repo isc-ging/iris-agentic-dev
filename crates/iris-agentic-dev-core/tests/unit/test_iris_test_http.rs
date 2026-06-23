@@ -99,7 +99,9 @@ fn test_build_test_run_one_failure() {
         },
     ];
     let result = build_test_run_from_sql(&suites, &methods);
-    assert_eq!(result["success"], false);
+    // success=true means tool ran; outcome captures test result
+    assert_eq!(result["success"], true);
+    assert_eq!(result["outcome"], "failed");
     assert_eq!(result["total"], 2);
     assert_eq!(result["passed"], 1);
     assert_eq!(result["failed"], 1);

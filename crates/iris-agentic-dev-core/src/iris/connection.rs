@@ -747,3 +747,97 @@ mod system_mode_tests {
         assert!(!is_production_namespace("MYAPP"));
     }
 }
+
+#[cfg(test)]
+mod pure_fn_tests {
+    use super::*;
+
+    fn make_conn() -> IrisConnection {
+        IrisConnection::new(
+            "http://localhost:52773",
+            "USER",
+            "_SYSTEM",
+            "SYS",
+            DiscoverySource::EnvVar,
+        )
+    }
+
+    // ── versioned_ns_url ──────────────────────────────────────────────────────
+    #[test]
+    fn versioned_ns_url_contains_namespace() {
+        let c = make_conn();
+        let url = c.versioned_ns_url("USER", "/docnames/CLS");
+        assert!(url.contains("USER"), "{url}");
+        assert!(url.contains("docnames"), "{url}");
+    }
+
+    #[test]
+    fn versioned_ns_url_encodes_percent_sys() {
+        let c = make_conn();
+        let url = c.versioned_ns_url("%SYS", "/action/query");
+        assert!(url.contains("%25SYS") || url.contains("%SYS"), "{url}");
+        assert!(url.contains("action/query"), "{url}");
+    }
+
+    #[test]
+    fn versioned_ns_url_different_namespaces() {
+        let c = make_conn();
+        let url1 = c.versioned_ns_url("MYNS", "/foo");
+        let url2 = c.versioned_ns_url("OTHERNS", "/foo");
+        assert_ne!(url1, url2);
+    }
+
+    // ── strip_iris_banner ────────────────────────────────────────────────────
+    #[test]
+    fn strip_iris_banner_empty_input() {
+        assert_eq!(strip_iris_banner("").trim(), "");
+    }
+
+    #[test]
+    fn strip_iris_banner_only_prompts() {
+        let raw = "USER>\nUSER>\n";
+        let stripped = strip_iris_banner(raw);
+        assert!(stripped.trim().is_empty(), "only prompts → empty: {stripped:?}");
+    }
+
+    #[test]
+    fn strip_iris_banner_output_without_banner() {
+        let raw = "42\n";
+        let stripped = strip_iris_banner(raw);
+        assert_eq!(stripped.trim(), "42");
+    }
+
+    // ── build_exec_class / build_exec_class_for_test ──────────────────────────
+    #[test]
+    fn build_exec_class_contains_class_name() {
+        let lines = IrisConnection::build_exec_class_for_test(
+            "IrisDevTmp.IrisDevRuntest123",
+            "/tmp/test.txt",
+            "Write 1",
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("IrisDevTmp.IrisDevRuntest123")),
+            "class name must appear in generated source"
+        );
+    }
+
+    #[test]
+    fn build_exec_class_contains_user_code() {
+        let lines = IrisConnection::build_exec_class_for_test(
+            "TestClass",
+            "/tmp/t.txt",
+            "Write \"hello world\"",
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("hello world")),
+            "user code must be embedded"
+        );
+    }
+
+    #[test]
+    fn build_exec_class_has_write_sentinel() {
+        let lines = IrisConnection::build_exec_class_for_test("T", "/tmp/t.txt", "Write 1");
+        let has_sentinel = lines.iter().any(|l| l.trim() == "Write !");
+        assert!(has_sentinel, "sentinel Write ! must be present");
+    }
+}
