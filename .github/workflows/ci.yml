@@ -196,29 +196,72 @@ jobs:
           echo "OK: ~/.claude.json documented"
 
           # Validate complete JSON objects/arrays in README (skip intentional fragments)
+          # Also validate mcpServers blocks match Claude Code / OpenCode schema
           python3 - <<'PYEOF'
           import re, json, sys
+
           readme = open("README.md").read()
           blocks = re.findall(r'```json\n(.*?)\n```', readme, re.DOTALL)
           errors = []
           skipped = 0
+
+          # Valid top-level keys for each MCP client config format:
+          #   Claude Code (~/.claude.json):    mcpServers
+          #   OpenCode (~/.opencode/config.json): mcp.providers or mcp (object with tool entries)
+          #   Cursor/VS Code:                  mcpServers (same as Claude Code)
+          KNOWN_MCP_ROOTS = {"mcpServers", "mcp"}
+
+          # Required fields for each server entry under mcpServers
+          # Claude Code format: { "command": str, "args": [...], "env": {...} }
+          MCP_SERVER_REQUIRED = {"command"}
+          MCP_SERVER_ALLOWED  = {"command", "args", "env", "type", "enabled", "environment"}
+
+          def validate_mcp_servers(data, block_num):
+              errs = []
+              servers = data.get("mcpServers", {})
+              if not isinstance(servers, dict):
+                  errs.append(f"Block {block_num}: mcpServers must be an object")
+                  return errs
+              for name, cfg in servers.items():
+                  if not isinstance(cfg, dict):
+                      errs.append(f"Block {block_num}: mcpServers.{name} must be an object")
+                      continue
+                  missing = MCP_SERVER_REQUIRED - cfg.keys()
+                  if missing:
+                      errs.append(f"Block {block_num}: mcpServers.{name} missing required field(s): {missing}")
+                  unknown = cfg.keys() - MCP_SERVER_ALLOWED
+                  if unknown:
+                      errs.append(f"Block {block_num}: mcpServers.{name} has unrecognized field(s): {unknown}")
+                  if "command" in cfg and not isinstance(cfg["command"], str):
+                      errs.append(f"Block {block_num}: mcpServers.{name}.command must be a string")
+                  if "args" in cfg and not isinstance(cfg["args"], list):
+                      errs.append(f"Block {block_num}: mcpServers.{name}.args must be an array")
+                  if "env" in cfg and not isinstance(cfg["env"], dict):
+                      errs.append(f"Block {block_num}: mcpServers.{name}.env must be an object")
+              return errs
+
           for i, block in enumerate(blocks):
               stripped = block.strip()
-              # Only validate blocks that look like complete objects or arrays
               if not (stripped.startswith('{') or stripped.startswith('[')):
                   skipped += 1
                   continue
               try:
-                  json.loads(block)
+                  data = json.loads(block)
               except json.JSONDecodeError as e:
-                  errors.append(f"Block {i+1}: {e}\n{block[:200]}")
+                  errors.append(f"Block {i+1}: invalid JSON — {e}\n{block[:200]}")
+                  continue
+              # Schema-check blocks that look like MCP client configs
+              if isinstance(data, dict) and data.keys() & KNOWN_MCP_ROOTS:
+                  if "mcpServers" in data:
+                      errors.extend(validate_mcp_servers(data, i+1))
+
           if errors:
-              print("FAIL: invalid JSON in README code blocks:")
+              print("FAIL: README JSON block errors:")
               for e in errors:
                   print(" ", e)
               sys.exit(1)
           validated = len(blocks) - skipped
-          print(f"OK: {validated} complete JSON blocks valid, {skipped} fragment(s) skipped")
+          print(f"OK: {validated} complete JSON blocks valid (schema-checked), {skipped} fragment(s) skipped")
           PYEOF
 
   cross-compile-check:
