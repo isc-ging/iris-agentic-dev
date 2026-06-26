@@ -2668,31 +2668,11 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
                 c["name"].as_str().unwrap_or("")
             )
         });
-        // FR-012: show which container .iris-agentic-dev.toml would select and if it's running.
-        let workspace_config_json = {
-            let ws_path = p.workspace_root.as_deref();
-            match crate::iris::workspace_config::load_workspace_config(ws_path) {
-                None => serde_json::Value::Null,
-                Some(ref cfg) => {
-                    let container_name = cfg.container.as_deref().unwrap_or("");
-                    let running = !container_name.is_empty()
-                        && containers
-                            .iter()
-                            .any(|c| c["name"].as_str() == Some(container_name));
-                    let config_path = crate::iris::workspace_config::workspace_root(ws_path)
-                        .join(".iris-agentic-dev.toml")
-                        .to_string_lossy()
-                        .to_string();
-                    serde_json::json!({
-                        "found": true,
-                        "path": config_path,
-                        "container": cfg.container,
-                        "namespace": cfg.namespace,
-                        "running": running,
-                    })
-                }
-            }
-        };
+        // FR-012 / FR-023: show workspace config, supporting both develop and operate mode.
+        let workspace_config_json = crate::iris::workspace_config::build_workspace_config_json(
+            p.workspace_root.as_deref(),
+            &containers,
+        );
         // Add active_connection info so agents can detect workspace_config mismatches
         // without a separate iris_info call.
         let iris_arc = self.iris_arc();
