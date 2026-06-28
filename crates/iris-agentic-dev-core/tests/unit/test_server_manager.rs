@@ -58,6 +58,22 @@ fn parse_multi_server_path_prefix() {
 }
 
 #[test]
+fn parse_flat_dotted_key_format() {
+    // VS Code stores settings with flat dotted keys ("intersystems.servers")
+    // rather than nested objects — both formats must be handled.
+    let profiles = parse_sm_settings(&fixture("sm_settings_flat_key.json"));
+    assert_eq!(profiles.len(), 2);
+    let dev = profiles.iter().find(|p| p.name == "iris-dev-iris").unwrap();
+    assert_eq!(dev.host, "localhost");
+    assert_eq!(dev.port, 52780);
+    let ivg = profiles
+        .iter()
+        .find(|p| p.name == "ivg-enterprise")
+        .unwrap();
+    assert_eq!(ivg.port, 64780);
+}
+
+#[test]
 fn parse_malformed_returns_empty() {
     let profiles = parse_sm_settings(&fixture("sm_settings_malformed.json"));
     assert!(
@@ -326,3 +342,210 @@ fn resolve_credential_username_lowercased_in_account_key() {
 
 // Serialize env-var–touching tests
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+// ── SmCredentialError Display ────────────────────────────────────────────────
+
+#[test]
+fn credential_not_found_display_contains_server_name() {
+    let e = SmCredentialError::CredentialNotFound {
+        server_name: "my-prod".to_string(),
+    };
+    let s = e.to_string();
+    assert!(
+        s.contains("my-prod"),
+        "CredentialNotFound display must contain server name: {s}"
+    );
+    assert!(
+        s.contains("Reconnect"),
+        "CredentialNotFound display must mention Reconnect: {s}"
+    );
+}
+
+#[test]
+fn ambiguous_display_lists_available_servers() {
+    let e = SmCredentialError::Ambiguous {
+        available: vec!["dev".to_string(), "staging".to_string(), "prod".to_string()],
+    };
+    let s = e.to_string();
+    assert!(s.contains("dev"), "Ambiguous display must list 'dev': {s}");
+    assert!(
+        s.contains("staging"),
+        "Ambiguous display must list 'staging': {s}"
+    );
+    assert!(
+        s.contains("prod"),
+        "Ambiguous display must list 'prod': {s}"
+    );
+    assert!(
+        s.contains("IRIS_SERVER_NAME"),
+        "Ambiguous display must mention IRIS_SERVER_NAME: {s}"
+    );
+}
+
+#[test]
+fn keychain_error_display_contains_server_and_detail() {
+    let e = SmCredentialError::KeychainError {
+        server_name: "corp-iris".to_string(),
+        detail: "permission denied".to_string(),
+    };
+    let s = e.to_string();
+    assert!(
+        s.contains("corp-iris"),
+        "KeychainError display must contain server name: {s}"
+    );
+    assert!(
+        s.contains("permission denied"),
+        "KeychainError display must contain detail: {s}"
+    );
+}
+
+// ── sm_settings_path ────────────────────────────────────────────────────────
+
+#[test]
+fn sm_settings_path_returns_some_on_this_platform() {
+    use iris_agentic_dev_core::iris::server_manager::sm_settings_path;
+    let path = sm_settings_path();
+    assert!(
+        path.is_some(),
+        "sm_settings_path must return Some on dev machines with a home directory"
+    );
+    let p = path.unwrap();
+    let s = p.to_string_lossy();
+    assert!(
+        s.contains("Code") || s.contains("code"),
+        "sm_settings_path must reference VS Code config dir: {s}"
+    );
+    assert!(
+        s.ends_with("settings.json"),
+        "sm_settings_path must end with settings.json: {s}"
+    );
+}
+
+// ── parse_sm_settings — edge cases ────────────────────────────────────────────
+
+#[test]
+fn parse_no_intersystems_key_returns_empty() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("settings.json");
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(b"{\"editor.fontSize\": 14}").unwrap();
+    let profiles = parse_sm_settings(&path);
+    assert!(
+        profiles.is_empty(),
+        "no intersystems.servers key must return empty vec"
+    );
+}
+
+#[test]
+fn parse_server_with_empty_host_skipped() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("settings.json");
+    let json = r#"{"intersystems":{"servers":{"bad":{"webServer":{"host":"","port":52773}}}}}"#;
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(json.as_bytes()).unwrap();
+    let profiles = parse_sm_settings(&path);
+    assert!(
+        profiles.is_empty(),
+        "server with empty host must be skipped"
+    );
+}
+
+#[test]
+fn parse_server_with_no_host_key_skipped() {
+    use std::io::Write;
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("settings.json");
+    let json = r#"{"intersystems":{"servers":{"nohost":{"webServer":{"port":52773},"username":"_SYSTEM"}}}}"#;
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(json.as_bytes()).unwrap();
+    let profiles = parse_sm_settings(&path);
+    assert!(
+        profiles.is_empty(),
+        "server without host field must be skipped"
+    );
+}
+
+// ── init_platform_keystore ──────────────────────────────────────────────────
+
+#[test]
+fn init_platform_keystore_does_not_panic() {
+    use iris_agentic_dev_core::iris::server_manager::init_platform_keystore;
+    init_platform_keystore();
+    init_platform_keystore();
+}
+
+// ── resolve_credential — generic error path ────────────────────────────────
+
+#[test]
+fn resolve_credential_generic_error_returns_credential_not_found() {
+    with_mock_store(|| {
+        let result = resolve_credential("error-server", "_SYSTEM");
+        assert!(result.is_err(), "missing entry must return Err: {result:?}");
+        match result.unwrap_err() {
+            SmCredentialError::CredentialNotFound { .. } => {}
+            other => panic!("expected CredentialNotFound, got: {other:?}"),
+        }
+    });
+}
+
+// ── build_server_manager_config_json — policy serialization ─────────────────
+
+#[test]
+fn check_config_sm_with_policy_allow_serialized() {
+    use iris_agentic_dev_core::iris::server_manager::{
+        build_server_manager_config_json, ServerManagerCredentialEntry,
+    };
+    use iris_agentic_dev_core::iris::workspace_config::{ConnectionPolicy, ToolCategory};
+    let profiles = parse_sm_settings(&fixture("sm_settings_single.json"));
+    let cred_entries = vec![ServerManagerCredentialEntry {
+        server_name: "dev-local".to_string(),
+        status: "resolved".to_string(),
+        policy: Some(ConnectionPolicy {
+            server_name: "dev-local".to_string(),
+            allow: Some(vec![ToolCategory::Query, ToolCategory::Docs]),
+        }),
+    }];
+    let json = build_server_manager_config_json(&profiles, Some("dev-local"), &cred_entries);
+    let servers = json["servers"].as_array().unwrap();
+    let policy = &servers[0]["policy"];
+    assert!(
+        !policy.is_null(),
+        "policy must be present when ConnectionPolicy is set"
+    );
+    let allow = policy["allow"].as_array().unwrap();
+    assert_eq!(allow.len(), 2, "allow must have 2 categories");
+    let cats: Vec<&str> = allow.iter().map(|v| v.as_str().unwrap()).collect();
+    assert!(cats.contains(&"query"), "allow must include 'query'");
+    assert!(cats.contains(&"docs"), "allow must include 'docs'");
+}
+
+#[test]
+fn check_config_sm_null_policy_when_no_policy_entry() {
+    use iris_agentic_dev_core::iris::server_manager::build_server_manager_config_json;
+    let profiles = parse_sm_settings(&fixture("sm_settings_single.json"));
+    let json = build_server_manager_config_json(&profiles, Some("dev-local"), &[]);
+    let servers = json["servers"].as_array().unwrap();
+    assert!(
+        servers[0]["policy"].is_null(),
+        "policy must be null when no cred_entry with policy"
+    );
+}
+
+// ── policy_gate — unknown tool ───────────────────────────────────────────────
+
+#[test]
+fn policy_gate_unknown_tool_not_gated() {
+    use iris_agentic_dev_core::iris::server_manager::policy_gate;
+    use iris_agentic_dev_core::iris::workspace_config::{ConnectionPolicy, ToolCategory};
+    let policy = ConnectionPolicy {
+        server_name: "prod".to_string(),
+        allow: Some(vec![ToolCategory::Query]),
+    };
+    let gate = policy_gate("unknown_future_tool", "prod", Some(&policy));
+    assert!(
+        gate.is_none(),
+        "unknown tool must not be gated (returns None)"
+    );
+}

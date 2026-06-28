@@ -1,0 +1,22 @@
+{
+  "intersystems.servers": {
+    "iris-dev-iris": {
+      "webServer": {
+        "host": "localhost",
+        "port": 52780,
+        "pathPrefix": ""
+      },
+      "username": "_SYSTEM",
+      "description": "iris-dev-iris local container"
+    },
+    "ivg-enterprise": {
+      "webServer": {
+        "host": "localhost",
+        "port": 64780,
+        "pathPrefix": ""
+      },
+      "username": "_SYSTEM",
+      "description": "IRIS 2026.1 enterprise via webgateway"
+    }
+  }
+}

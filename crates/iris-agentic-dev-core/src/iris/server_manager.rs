@@ -131,11 +131,16 @@ pub fn parse_sm_settings(path: &Path) -> Vec<ServerManagerProfile> {
         }
     };
 
+    // VS Code stores settings as flat dotted keys ("intersystems.servers") or
+    // sometimes as nested objects — handle both.
     let servers = match root
-        .get("intersystems")
-        .and_then(|i| i.get("servers"))
+        .get("intersystems.servers")
         .and_then(|s| s.as_object())
-    {
+        .or_else(|| {
+            root.get("intersystems")
+                .and_then(|i| i.get("servers"))
+                .and_then(|s| s.as_object())
+        }) {
         Some(m) => m,
         None => return vec![],
     };
