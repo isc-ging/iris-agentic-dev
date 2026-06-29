@@ -155,3 +155,32 @@ fn error_json_server_name_matches_input() {
     let r = check_env_gate("iris_compile", &McpTemplate::Live, "custom-server").unwrap();
     assert_eq!(r["server_name"], "custom-server");
 }
+
+// ── T062: dispatch_gate latency < 1ms avg (SC-005) ────────────────────────────
+
+#[test]
+fn test_gate_latency_under_1ms() {
+    use iris_agentic_dev_core::iris::workspace_config::{
+        ConnectionPolicy, DataPolicy, McpTemplate,
+    };
+    use iris_agentic_dev_core::policy::gate::dispatch_gate;
+
+    let policy = ConnectionPolicy {
+        server_name: "perf-server".to_string(),
+        allow: None,
+        mcp_template: Some(McpTemplate::Dev),
+        data_policy: Some(DataPolicy::Allow),
+        global_blocklist: vec![],
+        data_policy_kill_allowlist: vec![],
+    };
+    let params = serde_json::json!({});
+    let start = std::time::Instant::now();
+    for _ in 0..1000 {
+        let _ = dispatch_gate("iris_query", "perf-server", Some(&policy), &params);
+    }
+    let elapsed_ms = start.elapsed().as_millis();
+    assert!(
+        elapsed_ms < 1000,
+        "1000 dispatch_gate calls took {elapsed_ms}ms — must be < 1000ms (1ms avg per SC-005)"
+    );
+}

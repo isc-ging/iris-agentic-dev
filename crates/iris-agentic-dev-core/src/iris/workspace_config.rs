@@ -131,11 +131,35 @@ impl std::str::FromStr for ToolCategory {
     }
 }
 
+fn deserialize_opt_mcp_template<'de, D>(de: D) -> Result<Option<McpTemplate>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Deserialize as a raw string first; return None for unknown variants instead of erroring.
+    let s = match Option::<String>::deserialize(de)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    match s.as_str() {
+        "dev" => Ok(Some(McpTemplate::Dev)),
+        "test" => Ok(Some(McpTemplate::Test)),
+        "live" => Ok(Some(McpTemplate::Live)),
+        other => {
+            tracing::warn!(value = other, "unknown mcpTemplate value — treating as Dev");
+            Ok(None)
+        }
+    }
+}
+
 /// Raw TOML deserialization form of a policy block.
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct ConnectionPolicyRaw {
     pub allow: Option<Vec<ToolCategory>>,
-    #[serde(rename = "mcpTemplate")]
+    #[serde(
+        rename = "mcpTemplate",
+        deserialize_with = "deserialize_opt_mcp_template",
+        default
+    )]
     pub mcp_template: Option<McpTemplate>,
     #[serde(rename = "dataPolicy")]
     pub data_policy: Option<DataPolicy>,

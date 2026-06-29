@@ -29,18 +29,22 @@ Load `skills/objectscript-review/SKILL.md` if available. Otherwise apply this ch
 ## 1. ObjectScript Language Rules (LLM Gotchas)
 
 ### Control Flow
+
 1. **`Quit` vs `Return`** — `Quit <value>` is **illegal** inside `TRY/CATCH` or loops. Use `Return <value>` to exit a method with a value; use bare `Quit` only to exit the current loop or `FOR` block. When in doubt, use `Return`.
 2. **No operator precedence** — ObjectScript evaluates **strictly left-to-right**. `3+3*2 = 12`, not `9`. Always use parentheses for compound expressions.
 3. **No `finally`, single `Catch`** — `TRY/CATCH` has exactly one `Catch` block and no `finally`. Cleanup goes after the block. Differentiate exception types with `ex.%IsA("...")`.
 
 ### Methods & Variables
+
 4. **Intra-class method calls require `..`** — Inside a method, call `Do ..MyMethod()` not `Do MyMethod()`. `##class(Same.Class).MyMethod()` also works but `..` is idiomatic for same-class calls.
-5. **`NEW` is illegal inside methods** — Never use `New varname` inside a method body; method/procedure blocks are already isolated in scope.
-6. **Instance variables** — `i%PropertyName` accesses the raw slot directly; `..PropertyName` goes through the accessor. Prefer `..PropertyName` unless you have a specific reason not to.
+2. **`NEW` is illegal inside methods** — Never use `New varname` inside a method body; method/procedure blocks are already isolated in scope.
+3. **Instance variables** — `i%PropertyName` accesses the raw slot directly; `..PropertyName` goes through the accessor. Prefer `..PropertyName` unless you have a specific reason not to.
 
 ### Error Handling
+
 7. **`%Status` return convention** — Methods that can fail return `%Status`. Check with `$$$ISOK(sc)` / `$$$ISERR(sc)`. Return `$$$OK` on success. Never compare `If sc=0`; always use the macros.
-8. **Throwing and catching** — Use `$$$ThrowOnError(sc)` to throw on failure. Never `Throw sc` directly — `THROW` expects a `%Exception.AbstractException`. Correct pattern:
+2. **Throwing and catching** — Use `$$$ThrowOnError(sc)` to throw on failure. Never `Throw sc` directly — `THROW` expects a `%Exception.AbstractException`. Correct pattern:
+
    ```objectscript
    Try {
        $$$ThrowOnError(..DoSomething())
@@ -48,7 +52,8 @@ Load `skills/objectscript-review/SKILL.md` if available. Otherwise apply this ch
        Set sc = ex.AsStatus()
    }
    ```
-9. **Transaction discipline** — Always check `$TLEVEL` before rolling back. Standard pattern:
+3. **Transaction discipline** — Always check `$TLEVEL` before rolling back. Standard pattern:
+
    ```objectscript
    TStart
    Try {
@@ -61,10 +66,11 @@ Load `skills/objectscript-review/SKILL.md` if available. Otherwise apply this ch
    ```
 
 ### Types & Formats
+
 10. **`%TimeStamp` format** — `%TimeStamp` uses `YYYY-MM-DD HH:MM:SS` (a space, not `T`). **Not** ISO 8601 with `T`. This is the most common AI mistake. Always use space-separated format for any IRIS date/time literal.
-11. **String concatenation** — Use `_` to concatenate strings: `"Hello" _ " " _ name`. There is no `+` for strings.
-12. **Globals vs locals** — `^GlobalName` is database-persistent and shared across processes. Local variables (`var`) are process-scoped and temporary. Never use globals as temporary variables.
-13. **`$LISTNEXT` for list iteration** — To iterate a `%List`, use `$LISTNEXT(list, ptr, value)` with `Set ptr=0` before the loop. Do not use `FOR i=1:1:$LISTLENGTH(list)` — it is slower and error-prone for embedded lists.
+2. **String concatenation** — Use `_` to concatenate strings: `"Hello" _ " " _ name`. There is no `+` for strings.
+3. **Globals vs locals** — `^GlobalName` is database-persistent and shared across processes. Local variables (`var`) are process-scoped and temporary. Never use globals as temporary variables.
+4. **`$LISTNEXT` for list iteration** — To iterate a `%List`, use `$LISTNEXT(list, ptr, value)` with `Set ptr=0` before the loop. Do not use `FOR i=1:1:$LISTLENGTH(list)` — it is slower and error-prone for embedded lists.
 
 ---
 
@@ -73,6 +79,7 @@ Load `skills/objectscript-review/SKILL.md` if available. Otherwise apply this ch
 **If the objectscript MCP server is connected (check `/mcp`), always use MCP tools first. Fall back to bash only if the MCP is unavailable.**
 
 ### Via MCP tools (preferred)
+
 ```
 # Find classes by name pattern — live IRIS namespace
 iris_symbols(query="MyPackage.*")
@@ -97,7 +104,9 @@ iris_select_container(name="arno_iris_test")   # reconnects without restart
 **Do NOT use `docker exec` / `docker cp` / `iris session` bash commands when the MCP is connected.** The MCP handles container targeting automatically after `iris_select_container`.
 
 ### Reading class source from IRIS (INT / system classes)
+
 To read the source of any class — including system classes like `%ASQ.Engine` that have no `.cls` on disk:
+
 ```
 # Option 1 (preferred): docs_introspect — returns parsed method signatures
 docs_introspect(class_name="%ASQ.Engine")
@@ -111,6 +120,7 @@ docker cp <container>:/tmp/ASQEngine.cls /tmp/ASQEngine.cls
 ```
 
 ### Via bash (fallback only — when MCP is unavailable)
+
 ```bash
 # Compile a single class
 iris session IRIS -U USER "Do \$System.OBJ.Load(\"MyPackage/MyClass.cls\",\"ck\")"
@@ -120,11 +130,14 @@ iris session IRIS -U USER "Do ##class(%UnitTest.Manager).RunTest(\"MyPackage.Tes
 ```
 
 ### Reading compile errors
+
 IRIS compiler errors look like:
+
 ```
 ERROR #5659: Method 'Foo' in class 'My.Class' has a 'Return' that does not match the return type
 ERROR #5002: ObjectScript error in method 'Bar' in class 'My.Class'  <UNDEFINED>var+3^My.Class.1
 ```
+
 - The `+3^My.Class.1` suffix means line 3 of the compiled `.INT` routine — map back to your `.cls` source.
 - `<UNDEFINED>` means a variable was used before being set.
 - `<NOLINE>` at compile time usually means a syntax error above the reported line.
@@ -134,6 +147,7 @@ ERROR #5002: ObjectScript error in method 'Bar' in class 'My.Class'  <UNDEFINED>
 ## 3. Class Structure Templates
 
 ### Standard class with %Status error handling
+
 ```objectscript
 Class MyPackage.MyClass Extends %RegisteredObject
 {
@@ -163,6 +177,7 @@ ClassMethod GetValue(pKey As %String) As %String
 ```
 
 ### Persistent class
+
 ```objectscript
 Class MyPackage.MyRecord Extends %Persistent
 {
@@ -181,6 +196,7 @@ ClassMethod FindByName(pName As %String) As MyPackage.MyRecord
 ```
 
 ### %UnitTest test class
+
 ```objectscript
 Class MyPackage.Tests.MyClassTest Extends %UnitTest.TestCase
 {
@@ -322,7 +338,34 @@ CALLEE
 
 ---
 
-## 6. Using AI Skills (no MCP server required)
+## 6. MCP Tool Error Code Reference
+
+Error codes returned in the `error_code` field of tool responses. All follow `SCREAMING_SNAKE_CASE`.
+
+| Error Code | Meaning | Key Fields |
+|---|---|---|
+| `IRIS_UNREACHABLE` | Cannot reach IRIS — network error, wrong port, container down | `attempted_url` |
+| `AUTH_ERROR` | HTTP 401/403 — wrong credentials or insufficient privilege | — |
+| `COMPILE_ERROR` | Class/routine failed to compile | `errors[]`, `open_uri` |
+| `TIMEOUT` | Operation exceeded configured timeout | — |
+| `DOCKER_REQUIRED` | Operation needs docker exec but `IRIS_CONTAINER` not set | — |
+| `IRIS_NAMESPACE_NOT_FOUND` | Namespace does not exist on this IRIS instance | `namespace` |
+| `NO_TESTS_FOUND` | Test pattern matched no test classes | `pattern` |
+| `POLICY_GATE` | Tool not in the connection's `allow` category list | `server_name`, `allowed_categories` |
+| `ENV_GATE_BLOCKED` | `mcpTemplate` for this server blocks the tool's category | `server_name`, `template`, `blocked_category`, `remediation` |
+| `DATA_POLICY_BLOCKED` | `dataPolicy=block` (default) prevents bulk-PHI tool | `tool`, `policy`, `remediation` |
+| `SYSTEM_BLOCKLIST` | Global name matches system or per-connection blocklist | `global_name`, `matched_pattern` |
+| `PHI_GATE_BLOCKED` | Global name matches PHI name pattern; pass `acknowledgePhi=true` to proceed | `global_name`, `matched_pattern`, `remediation` |
+| `READ_ERROR` | Could not read local source file | `path` |
+| `UPLOAD_FAILED` | Atelier PUT rejected the document | `document`, `http_status` |
+| `CONTAINER_NOT_FOUND` | Named container not running in Docker | `container` |
+| `CONTAINER_UNREACHABLE` | Container found but Atelier HTTP probe failed | `container`, `port` |
+
+**PHI gate bypass** — for `PHI_GATE_BLOCKED`, add `"acknowledgePhi": true` to the tool call params. This only works for per-global name checks; `DATA_POLICY_BLOCKED` (bulk-PHI tools like `journal_search`) cannot be bypassed with `acknowledgePhi`.
+
+---
+
+## 7. Using AI Skills (no MCP server required)
 
 The `light-skills/` directory contains two standalone skills you can use with Claude Code,
 opencode, or any agent that supports markdown skill files:
@@ -333,12 +376,14 @@ opencode, or any agent that supports markdown skill files:
 | `compile.md` | Compiles a class via Atelier REST and returns structured error output for the AI to fix |
 
 Copy them to `.claude/skills/` or `.opencode/skills/` in your repo. Then invoke:
+
 - `/introspect MyPackage.MyClass` — before editing any class you haven't written
 - `/compile MyPackage.MyClass` — after every edit, before declaring done
 
 **These skills require only `curl` and a running IRIS web server** — no Python, no pip installs.
 
 Set these env vars (or substitute directly):
+
 ```bash
 export IRIS_HOST=localhost
 export IRIS_WEB_PORT=52773

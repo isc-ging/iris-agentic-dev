@@ -571,3 +571,58 @@ fn policy_gate_unknown_tool_not_gated() {
         "unknown tool must not be gated (returns None)"
     );
 }
+
+// ── T060: check_config response includes mcp_template and data_policy ─────────
+
+#[test]
+fn check_config_sm_policy_includes_mcp_template_and_data_policy() {
+    use iris_agentic_dev_core::iris::server_manager::{
+        build_server_manager_config_json, ServerManagerCredentialEntry,
+    };
+    use iris_agentic_dev_core::iris::workspace_config::{
+        ConnectionPolicy, DataPolicy, McpTemplate,
+    };
+    let profiles = parse_sm_settings(&fixture("sm_settings_single.json"));
+    let cred_entries = vec![ServerManagerCredentialEntry {
+        server_name: "dev-local".to_string(),
+        status: "resolved".to_string(),
+        policy: Some(ConnectionPolicy {
+            server_name: "dev-local".to_string(),
+            allow: None,
+            mcp_template: Some(McpTemplate::Live),
+            data_policy: Some(DataPolicy::Block),
+            global_blocklist: vec![],
+            data_policy_kill_allowlist: vec![],
+        }),
+    }];
+    let json = build_server_manager_config_json(&profiles, Some("dev-local"), &cred_entries);
+    let servers = json["servers"].as_array().unwrap();
+    let policy = &servers[0]["policy"];
+    assert_eq!(
+        policy["mcp_template"].as_str(),
+        Some("live"),
+        "mcp_template must serialize to 'live': {policy}"
+    );
+    assert_eq!(
+        policy["data_policy"].as_str(),
+        Some("block"),
+        "data_policy must serialize to 'block': {policy}"
+    );
+}
+
+// ── T061: unknown mcpTemplate TOML value deserializes to None ─────────────────
+
+#[test]
+fn unknown_mcp_template_toml_deserializes_to_none() {
+    use iris_agentic_dev_core::iris::workspace_config::load_fleet_config_from_str;
+    let toml = r#"
+[policy.prod]
+mcpTemplate = "staging"
+"#;
+    let cfg = load_fleet_config_from_str(toml).expect("parse must not fail");
+    let pol = cfg.policies.get("prod").expect("policy must exist");
+    assert!(
+        pol.mcp_template.is_none(),
+        "unknown mcpTemplate 'staging' must deserialize to None, not an error: {pol:?}"
+    );
+}
