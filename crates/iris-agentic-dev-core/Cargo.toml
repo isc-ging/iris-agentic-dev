@@ -261,5 +261,14 @@ name = "test_audit_phi_scrub"
 path = "tests/unit/test_audit_phi_scrub.rs"
 
 [[test]]
+name = "test_dispatch_gate"
+path = "tests/unit/test_dispatch_gate.rs"
+
+[[test]]
+name = "test_dispatch_gate_handlers"
+path = "tests/integration/test_dispatch_gate_handlers.rs"
+required-features = ["testing"]
+
+[[test]]
 name = "test_sm_e2e"
 path = "tests/integration/test_sm_e2e.rs"
