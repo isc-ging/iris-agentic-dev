@@ -199,6 +199,7 @@ bad-dep = { version = "not-a-semver-version!!", github = "owner/repo" }
 /// GitHub tag resolution picks the highest matching version.
 /// Uses intersystems-community/iris-dev which has known tags v0.2.0..v0.4.7.
 #[tokio::test]
+#[ignore = "requires GitHub API access — run with --include-ignored in CI with network"]
 async fn test_resolve_github_any_version_succeeds() {
     use iris_agentic_dev_core::manifest::resolve::{resolve_github_version_async, ResolvedSource};
     use semver::VersionReq;
@@ -222,6 +223,7 @@ async fn test_resolve_github_any_version_succeeds() {
 }
 
 #[tokio::test]
+#[ignore = "requires GitHub API access — run with --include-ignored in CI with network"]
 async fn test_resolve_github_specific_range() {
     use iris_agentic_dev_core::manifest::resolve::{resolve_github_version_async, ResolvedSource};
     use semver::VersionReq;
@@ -238,6 +240,7 @@ async fn test_resolve_github_specific_range() {
 }
 
 #[tokio::test]
+#[ignore = "requires GitHub API access — run with --include-ignored in CI with network"]
 async fn test_resolve_github_unsatisfiable_range_errors() {
     use iris_agentic_dev_core::manifest::resolve::{resolve_github_version_async, ResolvedSource};
     use semver::VersionReq;
@@ -251,6 +254,7 @@ async fn test_resolve_github_unsatisfiable_range_errors() {
 }
 
 #[tokio::test]
+#[ignore = "requires GitHub API access — run with --include-ignored in CI with network"]
 async fn test_resolve_github_nonexistent_repo_errors() {
     use iris_agentic_dev_core::manifest::resolve::{resolve_github_version_async, ResolvedSource};
     use semver::VersionReq;

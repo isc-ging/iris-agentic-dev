@@ -27,6 +27,7 @@ Skills are reusable workflows that help AI coding assistants work effectively wi
 | `objectscript-unit-test` | Testing | Generate %UnitTest.TestCase |
 | `opencode-introspect` | Session | Search OpenCode session logs |
 | `introspect` | Introspection | Read IRIS %Dictionary |
+| `iad-config-setup` | Setup | Guide users through `.iris-agentic-dev.toml` configuration |
 
 ## By Category
 
@@ -63,9 +64,12 @@ Skills are reusable workflows that help AI coding assistants work effectively wi
 - `objectscript-navigation` — Codebase discovery
 - `introspect` — Class introspection
 
+### Setup & Configuration
+- `iad-config-setup` — `.iris-agentic-dev.toml` setup guide
+
 ## Statistics
 
-- **Total Skills**: 21
+- **Total Skills**: 22
 - **Categories**: 8
 - **Avg Pass Rate**: ~90%
 - **Updated**: April 2026

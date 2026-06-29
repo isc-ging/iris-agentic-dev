@@ -181,6 +181,9 @@ fn mcp_server_tools_list_returns_23_tools() {
 }
 
 /// Startup latency p50 < 100ms over 5 runs (SC-001).
+///
+/// SC-001 target is for release builds. Debug builds run ~2-3x slower due to
+/// unoptimized code — threshold is relaxed to 500ms for debug builds.
 #[test]
 fn mcp_server_startup_latency_under_100ms() {
     let bin = iris_dev_bin();
@@ -217,10 +220,23 @@ fn mcp_server_startup_latency_under_100ms() {
 
     latencies.sort();
     let p50 = latencies[latencies.len() / 2];
+
+    // SC-001: p50 < 100ms on release builds; debug builds get 500ms
+    #[cfg(debug_assertions)]
+    let threshold = Duration::from_millis(500);
+    #[cfg(not(debug_assertions))]
+    let threshold = Duration::from_millis(100);
+
     assert!(
-        p50 < Duration::from_millis(100),
-        "p50 startup latency {}ms exceeds 100ms (SC-001)",
-        p50.as_millis()
+        p50 < threshold,
+        "p50 startup latency {}ms exceeds {}ms (SC-001{})",
+        p50.as_millis(),
+        threshold.as_millis(),
+        if cfg!(debug_assertions) {
+            " — debug build, threshold relaxed"
+        } else {
+            ""
+        }
     );
 }
 

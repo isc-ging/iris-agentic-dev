@@ -230,9 +230,12 @@ fn test_retry_template_contains_errors_placeholder() {
 }
 
 // ── LlmClient::from_env ──────────────────────────────────────────────────────
+// Serialize env-var–touching tests to prevent races between set/remove_var calls.
+static LLM_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn test_llm_client_from_env_none_when_model_unset() {
+    let _guard = LLM_ENV_LOCK.lock().unwrap();
     use iris_agentic_dev_core::generate::LlmClient;
     std::env::remove_var("IRIS_GENERATE_CLASS_MODEL");
     // OPENAI_API_KEY may or may not be set — without the model var, must return None
@@ -245,6 +248,7 @@ fn test_llm_client_from_env_none_when_model_unset() {
 
 #[test]
 fn test_llm_client_from_env_none_when_api_key_unset() {
+    let _guard = LLM_ENV_LOCK.lock().unwrap();
     use iris_agentic_dev_core::generate::LlmClient;
     std::env::set_var("IRIS_GENERATE_CLASS_MODEL", "gpt-4o");
     std::env::remove_var("OPENAI_API_KEY");
@@ -261,6 +265,7 @@ fn test_llm_client_from_env_none_when_api_key_unset() {
 
 #[test]
 fn test_llm_client_from_env_some_when_both_set() {
+    let _guard = LLM_ENV_LOCK.lock().unwrap();
     use iris_agentic_dev_core::generate::LlmClient;
     std::env::set_var("IRIS_GENERATE_CLASS_MODEL", "gpt-4o");
     std::env::set_var("OPENAI_API_KEY", "sk-test-key");
@@ -275,6 +280,7 @@ fn test_llm_client_from_env_some_when_both_set() {
 
 #[test]
 fn test_llm_client_from_env_anthropic_key_accepted() {
+    let _guard = LLM_ENV_LOCK.lock().unwrap();
     use iris_agentic_dev_core::generate::LlmClient;
     std::env::set_var("IRIS_GENERATE_CLASS_MODEL", "claude-3-5-sonnet-20241022");
     std::env::remove_var("OPENAI_API_KEY");

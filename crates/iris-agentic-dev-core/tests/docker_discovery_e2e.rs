@@ -20,6 +20,9 @@ fn iris_dev_bin() -> std::path::PathBuf {
     p
 }
 
+/// Skip the test if the iris-dev binary hasn't been built yet.
+/// Run `cargo build` first to enable these E2E tests.
+
 /// Spawn iris-dev mcp subprocess with IRIS_CONTAINER set, capture stderr output.
 /// Sends the MCP initialize handshake, waits up to 5 seconds, then kills.
 fn run_iris_dev_mcp_capture_stderr(container_name: &str, extra_env: &[(&str, &str)]) -> String {
@@ -151,6 +154,7 @@ fn start_fresh_container(
 
 /// T017: IRIS_CONTAINER pointing to a nonexistent container — "not found in Docker"
 #[test]
+#[ignore = "requires `cargo build` to produce target/debug/iris-dev binary"]
 fn test_container_not_found_message() {
     let stderr = run_iris_dev_mcp_capture_stderr("definitely-not-running-container-xyz", &[]);
     println!("stderr: {}", stderr);
@@ -170,6 +174,7 @@ fn test_container_not_found_message() {
 
 /// T024: Container running but port 52773 NOT mapped — "port 52773 is not mapped"
 #[test]
+#[ignore = "requires `cargo build` + Docker with IRIS community image"]
 fn test_port_not_mapped_message() {
     let _container = start_fresh_container(
         "containers.intersystems.com/intersystems/iris-community:2026.1",
@@ -201,6 +206,7 @@ fn test_port_not_mapped_message() {
 
 /// T040: Community container without IRIS_PASSWORD — exactly one 401 warn
 #[test]
+#[ignore = "requires `cargo build` + Docker with IRIS community image"]
 fn test_auth_401_single_warn() {
     // Start community container without IRIS_PASSWORD so _SYSTEM gets OS auth only
     let _ = Command::new("docker")
@@ -285,6 +291,7 @@ fn test_enterprise_web_server_absent_message() {
 
 /// T047: Community regression — iris-community:2026.1 and irishealth-community:2026.1
 #[test]
+#[ignore = "requires `cargo build` + Docker with IRIS community image"]
 fn test_all_community_images() {
     // iris-community: port not mapped → port-not-mapped message
     let _c1 = start_fresh_container(

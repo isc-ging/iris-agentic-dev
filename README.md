@@ -20,7 +20,7 @@ This is the fastest path if you already use VS Code with the InterSystems Object
 
 To verify the connection, ask Copilot: *"Call check_config and show me the result."*
 
-If the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) extension is installed, credentials are retrieved from the OS keychain automatically.
+If the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) extension is installed, iris-agentic-dev reads your server list and retrieves credentials from the OS keychain automatically — no additional config needed. Set `IRIS_SERVER_NAME` if you have multiple servers configured.
 
 > **Windows users**: iris-agentic-dev works with native IRIS on Windows — Docker is not required. If you hit a 404 on `/api/atelier`, see [Windows IIS setup](#windows-iis-api-web-application-required) below.
 
@@ -125,6 +125,7 @@ password = "SYS"
 This is the most common failure on Windows. IIS needs an explicit `/api` web application mapped to the IRIS Web Gateway module. Without it, `/api/atelier` returns 404 — even when the Management Portal loads correctly.
 
 **To fix:**
+
 1. Open **IIS Manager** → expand your server → **Sites** → **Default Web Site**
 2. Right-click → **Add Application**. Set alias: `api`, physical path: `C:\InterSystems\IRIS\CSP\bin` (adjust to your install path)
 3. Add a wildcard script handler mapping: executable = `CSPms.dll`, no verb restriction
@@ -167,6 +168,46 @@ services:
 
 See the [`iris-vscode-objectscript` skill](./light-skills/skills/iris-vscode-objectscript/SKILL.md) for a working `webgateway-init.sh`.
 
+### VS Code Server Manager (zero-config)
+
+If the [InterSystems Server Manager](https://marketplace.visualstudio.com/items?itemName=intersystems-community.servermanager) extension is installed, iris-agentic-dev reads your server list from VS Code's `settings.json` and resolves credentials from the OS keychain automatically — no `.iris-agentic-dev.toml` needed.
+
+**Single server configured:** auto-connects, no extra setup.
+
+**Multiple servers configured:** set `IRIS_SERVER_NAME` to the map key from `intersystems.servers`:
+
+```bash
+export IRIS_SERVER_NAME=dev-local
+```
+
+Credentials are stored under keychain service `"intersystems-server-credentials"` — the auth provider ID used by Server Manager in all VS Code-compatible forks (Cursor, Windsurf, VS Code Insiders). If a credential is missing, iris-agentic-dev fails fast with a message directing you to reconnect in VS Code (right-click the server → **Reconnect**) rather than silently falling through to other discovery sources.
+
+Use `check_config` to see which servers were detected and whether credentials resolved:
+
+```json
+{
+  "server_manager": {
+    "available": true,
+    "servers": [
+      { "name": "dev-local", "active": true, "credential_status": "resolved" }
+    ]
+  }
+}
+```
+
+### Per-connection policy (fleet / operate mode)
+
+Add `[policy.<server-name>]` blocks to `.iris-agentic-dev.toml` to restrict which tool categories are permitted on a given Server Manager server:
+
+```toml
+[policy.prod]
+allow = ["query", "search", "docs"]
+```
+
+Blocked calls return `error_code: "POLICY_GATE"` with the list of allowed categories. Omit the block entirely to permit everything. Available categories: `compile`, `execute`, `query`, `search`, `docs`, `source_control`, `debug`, `admin`, `skill`, `kb`.
+
+For multi-instance fleet workflows (`mode = "operate"`), see the [fleet roles spec](./specs/003-workspace-config/) for the full `[instance.*]` config format and role-gate behavior.
+
 ### Connection discovery order
 
 iris-agentic-dev resolves the IRIS connection in this order — first match wins:
@@ -175,8 +216,9 @@ iris-agentic-dev resolves the IRIS connection in this order — first match wins
 2. `.iris-agentic-dev.toml` in the workspace root
 3. Environment variables (`IRIS_HOST`, etc.)
 4. VS Code `settings.json` (`objectscript.conn` / `intersystems.servers`)
-5. Running Docker containers (scored by workspace name similarity)
-6. Localhost port scan (52773, 41773, 51773, 8080)
+5. VS Code Server Manager keychain (`intersystems.servers` + OS keychain credential)
+6. Running Docker containers (scored by workspace name similarity)
+7. Localhost port scan (52773, 41773, 51773, 8080)
 
 ### Environment variables
 
@@ -185,11 +227,12 @@ iris-agentic-dev resolves the IRIS connection in this order — first match wins
 | `IRIS_HOST` | `localhost` | IRIS web gateway hostname |
 | `IRIS_WEB_PORT` | `52773` | Web gateway port |
 | `IRIS_SCHEME` | `http` | `http` or `https` |
-| `IRIS_WEB_PREFIX` | _(empty)_ | URL path prefix for non-root gateway installs |
+| `IRIS_WEB_PREFIX` | *(empty)* | URL path prefix for non-root gateway installs |
 | `IRIS_USERNAME` | `_SYSTEM` | IRIS username |
 | `IRIS_PASSWORD` | `SYS` | IRIS password |
 | `IRIS_NAMESPACE` | `USER` | Default namespace |
-| `IRIS_CONTAINER` | _(empty)_ | Docker container name — required for Docker-dependent tools |
+| `IRIS_CONTAINER` | *(empty)* | Docker container name — required for Docker-dependent tools |
+| `IRIS_SERVER_NAME` | *(empty)* | Server Manager server name when multiple are configured |
 | `OBJECTSCRIPT_WORKSPACE` | `$PWD` | Workspace root for `.iris-agentic-dev.toml` lookup |
 
 ---
@@ -211,6 +254,7 @@ The top skill is **`objectscript-review`** — a 205-word checklist that catches
 **VS Code Copilot:** Skills are included automatically when you install the extension.
 
 **Claude Code:**
+
 ```bash
 mkdir -p ~/.claude/skills
 for skill in objectscript-review objectscript-guardrails objectscript-sql-patterns; do
@@ -221,6 +265,7 @@ done
 ```
 
 **OpenCode:**
+
 ```bash
 mkdir -p ~/.config/opencode/skills
 for skill in objectscript-review objectscript-guardrails objectscript-sql-patterns; do
@@ -321,6 +366,8 @@ Most tools work over the Atelier REST API and connect to any IRIS instance. Tool
 | All tools fail, namespace listing works | API version mismatch | Verify IRIS supports Atelier v8 (`iris-agentic-dev --verbose` shows detected version) |
 | 403 on write operations | Insufficient permissions | Use a user with `%DB_USER` or `%All` role |
 | Connection delays on Windows | `localhost` DNS issue | Use `host = "127.0.0.1"` in `.iris-agentic-dev.toml` |
+| `SERVER_MANAGER_CREDENTIAL_ERROR` | Credential not in OS keychain | VS Code → Server Manager → right-click server → **Reconnect** |
+| `SERVER_MANAGER_AMBIGUOUS` | Multiple SM servers, no `IRIS_SERVER_NAME` | Set `IRIS_SERVER_NAME=<server-key>` (see `check_config` for available names) |
 
 For verbose HTTP logging:
 

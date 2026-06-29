@@ -1,16 +1,26 @@
 //! T016-T017, T025, T030: Integration tests for SCM tools and open_uri.
-//! Run: IRIS_HOST=localhost IRIS_WEB_PORT=52780 IRIS_USERNAME=SuperUser IRIS_PASSWORD=SYS cargo test --test test_scm
+//! Run: IRIS_HOST=localhost IRIS_WEB_PORT=52780 IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS cargo test --test test_scm
 #![allow(dead_code, clippy::zombie_processes)]
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
 fn iris_dev_bin() -> std::path::PathBuf {
-    let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop();
-    p.pop();
-    p.push("target/debug/iris-dev");
-    p
+    let root = {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.pop();
+        p.pop();
+        p
+    };
+    for dir in &["target/llvm-cov-target/debug", "target/debug"] {
+        for name in &["iris-agentic-dev", "iris-dev"] {
+            let candidate = root.join(dir).join(name);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    root.join("target/debug/iris-agentic-dev")
 }
 
 fn mcp_exchange(
@@ -87,7 +97,7 @@ fn iris_env() -> Vec<(&'static str, String)> {
         ),
         (
             "IRIS_USERNAME",
-            std::env::var("IRIS_USERNAME").unwrap_or_else(|_| "SuperUser".into()),
+            std::env::var("IRIS_USERNAME").unwrap_or_else(|_| "_SYSTEM".into()),
         ),
         (
             "IRIS_PASSWORD",

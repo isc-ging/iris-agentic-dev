@@ -1,6 +1,9 @@
 #![allow(clippy::all)]
 use iris_agentic_dev_core::tools::admin::*;
 
+// Serialize tests that mutate IRIS_ADMIN_TOOLS to prevent races.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -17,6 +20,7 @@ fn result_text(r: &rmcp::model::CallToolResult) -> serde_json::Value {
 
 #[test]
 fn write_actions_disabled_without_env() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::remove_var("IRIS_ADMIN_TOOLS");
     let rt = rt();
 
@@ -190,8 +194,6 @@ fn webapp_type_inference() {
 }
 
 // ── admin_write_allowed helper ────────────────────────────────────────────────
-
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn write_allowed_with_env_set() {

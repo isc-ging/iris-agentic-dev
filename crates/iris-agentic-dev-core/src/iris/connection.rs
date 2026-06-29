@@ -67,11 +67,19 @@ impl fmt::Debug for IrisConnection {
 
 #[derive(Debug, Clone)]
 pub enum DiscoverySource {
-    LocalhostScan { port: u16 },
-    Docker { container_name: String },
+    LocalhostScan {
+        port: u16,
+    },
+    Docker {
+        container_name: String,
+    },
     VsCodeSettings,
     EnvVar,
     ExplicitFlag,
+    /// Discovered via VS Code Server Manager settings.json + OS keychain (044).
+    ServerManager {
+        server_name: String,
+    },
 }
 
 /// Structured result from a document compile operation.
@@ -656,6 +664,9 @@ fn is_bare_prompt_line(s: &str) -> bool {
 mod system_mode_tests {
     use super::*;
 
+    // Serialize tests that read or write IRIS_ALLOW_PROD to prevent races.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn conn(namespace: &str, mode: SystemMode) -> IrisConnection {
         let mut c = IrisConnection::new(
             "http://localhost:52773",
@@ -707,6 +718,7 @@ mod system_mode_tests {
     // T006 — is_write_allowed()
     #[test]
     fn write_blocked_for_live() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let c = conn("USER", SystemMode::Live);
         // No IRIS_ALLOW_PROD set in this test
         std::env::remove_var("IRIS_ALLOW_PROD");
@@ -715,18 +727,21 @@ mod system_mode_tests {
 
     #[test]
     fn write_allowed_for_development() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("IRIS_ALLOW_PROD");
         assert!(conn("USER", SystemMode::Development).is_write_allowed());
     }
 
     #[test]
     fn write_allowed_for_test_mode() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("IRIS_ALLOW_PROD");
         assert!(conn("USER", SystemMode::Test).is_write_allowed());
     }
 
     #[test]
     fn write_blocked_for_unknown_with_prod_namespace() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("IRIS_ALLOW_PROD");
         assert!(!conn("PROD", SystemMode::Unknown).is_write_allowed());
         assert!(!conn("PRODUCTION", SystemMode::Unknown).is_write_allowed());
@@ -736,6 +751,7 @@ mod system_mode_tests {
 
     #[test]
     fn write_allowed_for_unknown_with_dev_namespace() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("IRIS_ALLOW_PROD");
         assert!(conn("USER", SystemMode::Unknown).is_write_allowed());
         assert!(conn("DEV", SystemMode::Unknown).is_write_allowed());
@@ -744,6 +760,7 @@ mod system_mode_tests {
 
     #[test]
     fn iris_allow_prod_overrides_live_mode() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("IRIS_ALLOW_PROD", "1");
         assert!(conn("USER", SystemMode::Live).is_write_allowed());
         std::env::remove_var("IRIS_ALLOW_PROD");
@@ -751,6 +768,8 @@ mod system_mode_tests {
 
     #[test]
     fn is_write_allowed_logic_direct() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("IRIS_ALLOW_PROD");
         // Test the override logic directly without touching process env vars.
         // The env var branch is: if IRIS_ALLOW_PROD is "1" or "true" → return true.
         // We verify the non-override paths only (env-based override tested manually).

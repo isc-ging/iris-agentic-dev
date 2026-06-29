@@ -36,7 +36,11 @@ async fn probe_atelier_respects_timeout() {
 
 /// When IRIS_HOST + IRIS_WEB_PORT env vars are set and valid, discover_iris
 /// should attempt to connect (and fail gracefully if not reachable).
+///
+/// Requires isolated environment: no Docker IRIS running, no VS Code Server Manager
+/// configured. Ignored by default because CI and developer machines may have SM configured.
 #[tokio::test]
+#[ignore = "requires isolated env — no Docker IRIS, no VS Code Server Manager configured"]
 async fn discover_iris_reads_env_vars() {
     // Set env vars to a non-existent host
     std::env::set_var("IRIS_HOST", "nonexistent.invalid");
@@ -59,7 +63,11 @@ async fn discover_iris_reads_env_vars() {
 }
 
 /// Without any config, discover_iris returns Ok(None) — not an error.
+///
+/// Requires isolated environment: no Docker IRIS running, no VS Code Server Manager
+/// configured. Ignored by default because CI and developer machines may have SM configured.
 #[tokio::test]
+#[ignore = "requires isolated env — no Docker IRIS, no VS Code Server Manager configured"]
 async fn discover_iris_returns_none_when_nothing_found() {
     // Ensure no env vars interfere
     std::env::remove_var("IRIS_HOST");

@@ -29,6 +29,186 @@ pub struct WorkspaceConfig {
     pub docker_only: bool,
 }
 
+/// Connection role for fleet/operate mode instances.
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConnectionRole {
+    #[default]
+    Workspace,
+    Subject,
+    ControlPlane,
+}
+
+/// Per-instance config block for `mode = "operate"` fleet configs.
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub struct InstanceConfig {
+    pub container: Option<String>,
+    pub namespace: Option<String>,
+    pub host: Option<String>,
+    pub web_port: Option<u16>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    #[serde(default)]
+    pub role: ConnectionRole,
+    pub memory_home: Option<String>,
+    pub subject: Option<String>,
+}
+
+/// Environment template gate: controls which tool categories are available on a connection.
+/// Default: `Dev` (all tools permitted).
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum McpTemplate {
+    #[default]
+    Dev,
+    Test,
+    Live,
+}
+
+/// PHI data policy: controls whether PHI-capable tools execute and how responses are handled.
+/// Default: `Block` (PHI-capable tools blocked before any IRIS call).
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DataPolicy {
+    #[default]
+    Block,
+    Allow,
+    /// PHI-capable tools permitted; PHI fields in responses replaced with `[REDACTED-PHI]`.
+    /// HL7 v2 field-level redaction is a follow-on delivery.
+    Redact,
+}
+
+/// Tool categories for per-connection policy gates (044-servermanager-discovery).
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCategory {
+    Compile,
+    Execute,
+    Query,
+    Search,
+    Docs,
+    SourceControl,
+    Debug,
+    Admin,
+    Skill,
+    Kb,
+}
+
+impl ToolCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ToolCategory::Compile => "compile",
+            ToolCategory::Execute => "execute",
+            ToolCategory::Query => "query",
+            ToolCategory::Search => "search",
+            ToolCategory::Docs => "docs",
+            ToolCategory::SourceControl => "source_control",
+            ToolCategory::Debug => "debug",
+            ToolCategory::Admin => "admin",
+            ToolCategory::Skill => "skill",
+            ToolCategory::Kb => "kb",
+        }
+    }
+}
+
+impl std::str::FromStr for ToolCategory {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "compile" => Ok(ToolCategory::Compile),
+            "execute" => Ok(ToolCategory::Execute),
+            "query" => Ok(ToolCategory::Query),
+            "search" => Ok(ToolCategory::Search),
+            "docs" => Ok(ToolCategory::Docs),
+            "source_control" => Ok(ToolCategory::SourceControl),
+            "debug" => Ok(ToolCategory::Debug),
+            "admin" => Ok(ToolCategory::Admin),
+            "skill" => Ok(ToolCategory::Skill),
+            "kb" => Ok(ToolCategory::Kb),
+            other => Err(format!("unknown tool category: '{other}'")),
+        }
+    }
+}
+
+fn deserialize_opt_mcp_template<'de, D>(de: D) -> Result<Option<McpTemplate>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Deserialize as a raw string first; return None for unknown variants instead of erroring.
+    let s = match Option::<String>::deserialize(de)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    match s.as_str() {
+        "dev" => Ok(Some(McpTemplate::Dev)),
+        "test" => Ok(Some(McpTemplate::Test)),
+        "live" => Ok(Some(McpTemplate::Live)),
+        other => {
+            tracing::warn!(value = other, "unknown mcpTemplate value — treating as Dev");
+            Ok(None)
+        }
+    }
+}
+
+/// Raw TOML deserialization form of a policy block.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ConnectionPolicyRaw {
+    pub allow: Option<Vec<ToolCategory>>,
+    #[serde(
+        rename = "mcpTemplate",
+        deserialize_with = "deserialize_opt_mcp_template",
+        default
+    )]
+    pub mcp_template: Option<McpTemplate>,
+    #[serde(rename = "dataPolicy")]
+    pub data_policy: Option<DataPolicy>,
+    #[serde(rename = "globalBlocklist", default)]
+    pub global_blocklist: Vec<String>,
+    #[serde(rename = "dataPolicyKillAllowlist", default)]
+    pub data_policy_kill_allowlist: Vec<String>,
+}
+
+/// Per-connection policy config from `[policy.<server-name>]` in `.iris-agentic-dev.toml`.
+///
+/// - `allow = None` → all categories permitted.
+/// - `allow = Some([...])` → only listed categories permitted; all others blocked.
+#[derive(Debug, Clone)]
+pub struct ConnectionPolicy {
+    /// The `[policy.<server-name>]` map key.
+    pub server_name: String,
+    /// Allowlist of permitted categories. `None` = all permitted.
+    pub allow: Option<Vec<ToolCategory>>,
+    /// Environment template gate. `None` → `Dev` (all tools permitted).
+    pub mcp_template: Option<McpTemplate>,
+    /// PHI data policy. `None` → `Block` (PHI-capable tools blocked by default).
+    pub data_policy: Option<DataPolicy>,
+    /// Per-connection additional global blocklist patterns (extends system blocklist).
+    pub global_blocklist: Vec<String>,
+    /// Patterns exempted from kill-operation blocklist check only.
+    pub data_policy_kill_allowlist: Vec<String>,
+}
+
+/// Top-level fleet config. Wraps WorkspaceConfig for backward-compatible develop mode.
+///
+/// Parsing rule: load as FleetConfig.
+/// - mode absent or "develop" → use `workspace` (flat fields); ignore `instance` map.
+/// - mode = "operate" → use `instance` map; flat `workspace` fields are informational.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct FleetConfig {
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub instance: std::collections::HashMap<String, InstanceConfig>,
+    /// Per-connection policy blocks: `[policy.<server-name>]`
+    #[serde(default)]
+    pub policy: std::collections::HashMap<String, ConnectionPolicyRaw>,
+    #[serde(flatten)]
+    pub workspace: WorkspaceConfig,
+    /// Resolved policies (populated after parsing).
+    #[serde(skip)]
+    pub policies: std::collections::HashMap<String, ConnectionPolicy>,
+}
+
 /// Resolve the workspace root path.
 /// Priority: OBJECTSCRIPT_WORKSPACE env var > workspace_path arg > walk up from cwd.
 ///
@@ -110,6 +290,217 @@ pub fn load_workspace_config(workspace_path: Option<&str>) -> Option<WorkspaceCo
                 None
             }
         },
+    }
+}
+
+/// Load `.iris-agentic-dev.toml` as a `FleetConfig` (Amendment 001).
+/// Returns `None` if the file does not exist or fails to parse (with a warning).
+pub fn load_fleet_config(workspace_path: Option<&str>) -> Option<FleetConfig> {
+    let root = workspace_root(workspace_path);
+    let config_path = if root.join(".iris-agentic-dev.toml").exists() {
+        root.join(".iris-agentic-dev.toml")
+    } else if root.join(".iris-dev.toml").exists() {
+        root.join(".iris-dev.toml")
+    } else {
+        return None;
+    };
+
+    match std::fs::read_to_string(&config_path) {
+        Err(e) => {
+            tracing::warn!("Could not read config at {}: {}", config_path.display(), e);
+            None
+        }
+        Ok(contents) => match load_fleet_config_from_str(&contents) {
+            Ok(cfg) => {
+                tracing::debug!("Loaded fleet config from {}", config_path.display());
+                Some(cfg)
+            }
+            Err(e) => {
+                tracing::warn!("Could not parse config at {}: {}", config_path.display(), e);
+                None
+            }
+        },
+    }
+}
+
+/// Parse a `FleetConfig` from a TOML string.
+/// Resolves `policy` blocks into the `policies` map post-parse.
+pub fn load_fleet_config_from_str(contents: &str) -> Result<FleetConfig, toml::de::Error> {
+    let mut cfg: FleetConfig = toml::from_str(contents)?;
+    // Resolve raw policy blocks into ConnectionPolicy structs
+    for (name, raw) in &cfg.policy {
+        cfg.policies.insert(
+            name.clone(),
+            ConnectionPolicy {
+                server_name: name.clone(),
+                allow: raw.allow.clone(),
+                mcp_template: raw.mcp_template.clone(),
+                data_policy: raw.data_policy.clone(),
+                global_blocklist: raw.global_blocklist.clone(),
+                data_policy_kill_allowlist: raw.data_policy_kill_allowlist.clone(),
+            },
+        );
+    }
+    Ok(cfg)
+}
+
+/// Validate a FleetConfig: replace unknown `memory_home` keys with `"self"` (with a warning).
+pub fn validate_fleet_config(cfg: &mut FleetConfig) {
+    let known_keys: std::collections::HashSet<String> = cfg.instance.keys().cloned().collect();
+    for (name, inst) in cfg.instance.iter_mut() {
+        if let Some(ref mh) = inst.memory_home.clone() {
+            if mh != "self" && !known_keys.contains(mh.as_str()) {
+                tracing::warn!(
+                    "instance '{}': memory-home '{}' is not a declared instance key — falling back to 'self'",
+                    name, mh
+                );
+                inst.memory_home = Some("self".into());
+            }
+        }
+    }
+}
+
+/// Role-gate check for subject instances (FR-019, FR-020).
+///
+/// Returns `Some(error_json)` when the call should be blocked, `None` when it should proceed.
+///
+/// - `role`: the connection role to check.
+/// - `tool_name`: tool identifier, e.g. `"iris_compile"` or `"iris_source_control:commit"`.
+///   For `iris_query`, pass `"iris_query:SELECT"` / `"iris_query:INSERT"` etc.
+///   SELECT (and other read-only SQL) should be passed as `"iris_query:SELECT"` — not gated.
+/// - `confirm`: whether the caller passed `confirm: true`.
+/// - `instance_name`: the `[instance.*]` key (for the error message).
+/// - `hard_block`: if `true`, no confirm path exists (used for source_control writes).
+///
+/// Pure function — no I/O, no side effects.
+pub fn check_role_gate(
+    role: &ConnectionRole,
+    tool_name: &str,
+    confirm: bool,
+    instance_name: &str,
+    hard_block: bool,
+) -> Option<serde_json::Value> {
+    // Workspace and ControlPlane are never gated
+    if *role != ConnectionRole::Subject {
+        return None;
+    }
+
+    // SELECT and other read-only queries are never gated
+    if tool_name == "iris_query:SELECT"
+        || tool_name == "iris_query:select"
+        || tool_name.starts_with("iris_source_control:status")
+        || tool_name.starts_with("iris_source_control:diff")
+        || tool_name.starts_with("iris_source_control:log")
+        || tool_name.starts_with("iris_source_control:list")
+        || tool_name.starts_with("iris_source_control:get")
+    {
+        return None;
+    }
+
+    // Hard block: no confirm path (source_control writes).
+    // confirm: true is silently accepted at the parameter level (shared field with soft-gate ops)
+    // but has no effect here — confirm_ignored: true makes this explicit to agents.
+    if hard_block {
+        return Some(serde_json::json!({
+            "error": "role_gate",
+            "role_gate": true,
+            "hard_block": true,
+            "confirm_ignored": true,
+            "instance": instance_name,
+            "role": "subject",
+            "message": format!(
+                "Instance '{}' has role 'subject'. Source-control write operations are not permitted on subject instances. confirm: true has no effect on hard-blocked operations.",
+                instance_name
+            ),
+        }));
+    }
+
+    // Soft gate: confirm=true bypasses
+    if confirm {
+        return None;
+    }
+
+    Some(serde_json::json!({
+        "error": "role_gate",
+        "role_gate": true,
+        "instance": instance_name,
+        "role": "subject",
+        "required_confirmation": tool_name,
+        "message": format!(
+            "Instance '{}' has role 'subject'. Re-issue with confirm: true to proceed.",
+            instance_name
+        ),
+    }))
+}
+
+/// Build the `workspace_config` JSON field for `iris_list_containers`.
+///
+/// - `mode = "operate"`: returns an object with `mode`, `instances` (each with role/memory_home/subject/running).
+/// - develop mode or absent: returns the existing shape (found/path/container/namespace/running).
+/// - no config file: returns `serde_json::Value::Null`.
+pub fn build_workspace_config_json(
+    workspace_path: Option<&str>,
+    running_containers: &[serde_json::Value],
+) -> serde_json::Value {
+    let mut cfg = match load_fleet_config(workspace_path) {
+        None => return serde_json::Value::Null,
+        Some(c) => c,
+    };
+    validate_fleet_config(&mut cfg);
+
+    let config_path = workspace_root(workspace_path)
+        .join(".iris-agentic-dev.toml")
+        .to_string_lossy()
+        .to_string();
+
+    if cfg.mode.as_deref() == Some("operate") {
+        let mut instances = serde_json::Map::new();
+        for (name, inst) in &cfg.instance {
+            let memory_home = inst.memory_home.clone().unwrap_or_else(|| "self".into());
+            let running = inst
+                .container
+                .as_deref()
+                .map(|c| {
+                    running_containers
+                        .iter()
+                        .any(|r| r["name"].as_str() == Some(c))
+                })
+                .unwrap_or(false);
+            let role_str = match inst.role {
+                ConnectionRole::Workspace => "workspace",
+                ConnectionRole::Subject => "subject",
+                ConnectionRole::ControlPlane => "control-plane",
+            };
+            instances.insert(
+                name.clone(),
+                serde_json::json!({
+                    "role": role_str,
+                    "memory_home": memory_home,
+                    "subject": inst.subject,
+                    "running": running,
+                }),
+            );
+        }
+        serde_json::json!({
+            "found": true,
+            "path": config_path,
+            "mode": "operate",
+            "instances": serde_json::Value::Object(instances),
+        })
+    } else {
+        // Develop mode — return existing shape unchanged
+        let container_name = cfg.workspace.container.as_deref().unwrap_or("");
+        let running = !container_name.is_empty()
+            && running_containers
+                .iter()
+                .any(|c| c["name"].as_str() == Some(container_name));
+        serde_json::json!({
+            "found": true,
+            "path": config_path,
+            "container": cfg.workspace.container,
+            "namespace": cfg.workspace.namespace,
+            "running": running,
+        })
     }
 }
 
@@ -274,6 +665,36 @@ namespace = "{namespace}"
 # username = "_SYSTEM"
 # password = "..."  # not recommended in committed files
 "#
+    )
+}
+
+/// Generate starter `.iris-agentic-dev.toml` for `iris-dev init --mode operate`.
+/// Produces one active `[instance.local]` block and a commented-out `[instance.subject]` block.
+pub fn generate_operate_toml_content(local_container: &str, local_namespace: &str) -> String {
+    format!(
+        r#"# iris-agentic-dev fleet configuration (operate mode)
+# Use this when managing multiple named IRIS instances.
+# Commit this file to share connection settings with your team.
+mode = "operate"
+
+# ── Local / control-plane instance ──────────────────────────────────────────
+[instance.local]
+container = "{local_container}"
+namespace = "{local_namespace}"
+role = "workspace"            # "workspace" or "control-plane": no write gating
+
+# ── Subject instance (e.g. a customer/production IRIS) ──────────────────────
+# Uncomment and fill in to add a subject instance.
+# [instance.subject]
+# host = "subject-iris.example.com"
+# web_port = 52773
+# namespace = "USER"
+# role = "subject"            # destructive ops require explicit confirm: true
+# memory-home = "local"       # route AI memory writes to the 'local' instance
+# subject = "MyCustomer"      # free-form label identifying this subject
+"#,
+        local_container = local_container,
+        local_namespace = local_namespace,
     )
 }
 
