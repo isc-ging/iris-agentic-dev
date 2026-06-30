@@ -794,6 +794,20 @@ pub struct SourceMapParams {
     #[serde(default = "default_namespace")]
     pub namespace: String,
 }
+// 053-doc-depth
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IrisExecuteMethodParams {
+    /// Class name e.g. "%Library.Integer" or "MyApp.Utils"
+    pub class: String,
+    /// Method name e.g. "IsValid" or "FormatDate"
+    pub method: String,
+    /// Positional string arguments passed to the method
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ExecuteParams {
     pub code: String,
@@ -1429,8 +1443,8 @@ impl IrisTools {
     /// Returns the set of tool names registered for the current toolset.
     /// Used by tests and by the benchmark harness to build valid_tool_names.
     pub fn registered_tool_names(&self) -> std::collections::HashSet<String> {
-        // Authoritative baseline list — 35 tools (052: +iris_global).
-        // 35 - stubs(4) = nostub(31); 31 - merged_removed(4) + merged_added(5) = merged(32)
+        // Authoritative baseline list — 36 tools (053: +iris_execute_method).
+        // 36 - stubs(4) = nostub(32); 32 - merged_removed(4) + merged_added(6) = merged(35)
         // Note: iris_symbols_local is no longer a stub (025-symbols-local-ts)
         let all_tools: &[&str] = &[
             // REST — 14
@@ -1479,6 +1493,8 @@ impl IrisTools {
             "check_config",
             // 052-iris-global
             "iris_global",
+            // 053-doc-depth
+            "iris_execute_method",
         ];
 
         // Tools removed in nostub — 4 stubs returning NOT_IMPLEMENTED
@@ -1508,6 +1524,8 @@ impl IrisTools {
             "iris_get_log",
             // 052-iris-global
             "iris_global",
+            // 053-doc-depth
+            "iris_execute_method",
         ];
 
         let mut names: std::collections::HashSet<String> =
@@ -1606,6 +1624,8 @@ impl IrisTools {
                 "iris_get_log",
                 // 052-iris-global
                 "iris_global",
+                // 053-doc-depth
+                "iris_execute_method",
             ];
             for name in merged_only {
                 router.remove_route(name);
@@ -4449,6 +4469,45 @@ Methods:
         ok_json(result)
     }
 
+    // ── 053: iris_execute_method ──────────────────────────────────────────────
+
+    #[tool(
+        description = "Invoke a ClassMethod directly by class+method+args without writing ObjectScript boilerplate. Returns the string return value. Execute-gated: blocked on mcpTemplate=live and mcpTemplate=test. v1 limitation: only string-returning methods."
+    )]
+    async fn iris_execute_method(
+        &self,
+        Parameters(p): Parameters<IrisExecuteMethodParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let iris = self.get_iris_reloaded().await?;
+        let (sm_server, policy) = self.active_server_manager_policy();
+        let params_json = serde_json::json!({
+            "class": p.class,
+            "method": p.method,
+            "args": p.args,
+        });
+        let gate = crate::policy::gate::dispatch_gate(
+            "iris_execute_method",
+            sm_server.as_deref().unwrap_or(""),
+            policy.as_ref(),
+            &params_json,
+        );
+        if let Err(ref gate_err) = gate {
+            self.write_audit_entry(
+                "iris_execute_method",
+                sm_server.as_deref().unwrap_or(""),
+                policy.as_ref(),
+                "blocked",
+                Some("policy"),
+                None,
+                params_json.clone(),
+            );
+            return ok_json(gate_err.clone());
+        }
+        let result = doc::handle_iris_execute_method(&iris, &self.client, &p).await;
+        self.record_call("iris_execute_method", result.is_ok());
+        result
+    }
+
     // ── Merged tools (T029–T032, registered only when IRIS_TOOLSET=merged) ─────
     // These are always present in the #[tool_router] but removed via remove_route()
     // for Baseline and Nostub toolsets in with_registry_and_toolset().
@@ -6767,6 +6826,11 @@ impl IrisTools {
         dispatch!("skill_optimize", SkillNameParams, skill_optimize);
         dispatch!("skill_share", SkillNameParams, skill_share);
         dispatch!("iris_global", global::IrisGlobalParams, iris_global);
+        dispatch!(
+            "iris_execute_method",
+            IrisExecuteMethodParams,
+            iris_execute_method
+        );
         Err(format!("unknown tool: {tool}"))
     }
 }

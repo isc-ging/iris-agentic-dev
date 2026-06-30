@@ -2,7 +2,7 @@
 
 **Feature Branch**: `053-doc-depth`
 **Created**: 2026-06-29
-**Status**: Draft
+**Status**: Implemented
 **Depends on**: 051 (env gates — merged to master)
 
 ## Overview

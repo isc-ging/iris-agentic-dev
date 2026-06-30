@@ -626,3 +626,17 @@ mcpTemplate = "staging"
         "unknown mcpTemplate 'staging' must deserialize to None, not an error: {pol:?}"
     );
 }
+
+// ── T042: iris_execute_method appears in check_config tool inventory ──────────
+
+#[test]
+fn iris_execute_method_in_registered_tool_names() {
+    use iris_agentic_dev_core::tools::{IrisTools, Toolset};
+    let tools = IrisTools::new_with_toolset(None, Toolset::Merged).expect("IrisTools::new");
+    assert!(
+        tools
+            .registered_tool_names()
+            .contains("iris_execute_method"),
+        "iris_execute_method must appear in Merged toolset registered_tool_names()"
+    );
+}

@@ -16,30 +16,30 @@ must complete before any US phase begins.
 **Purpose**: Add new DocMode variants + params to IrisDocParams + stub dispatch arms + register
 iris_execute_method. All US phases depend on this compiling.
 
-- [ ] T001 Add `Fragment`, `Compiled`, `List` variants to the `DocMode` enum in
+- [X] T001 Add `Fragment`, `Compiled`, `List` variants to the `DocMode` enum in
       `crates/iris-agentic-dev-core/src/tools/doc.rs` — add `from_str` match arms for
       `"fragment"`, `"compiled"`, `"list"` alongside existing modes
-- [ ] T002 Add new optional fields to `IrisDocParams` struct in
+- [X] T002 Add new optional fields to `IrisDocParams` struct in
       `crates/iris-agentic-dev-core/src/tools/doc.rs`:
       `start: Option<i64>`, `end: Option<i64>`, `compiled_type: Option<String>`,
       `pattern: Option<String>`, `category: Option<String>`, `max_results: Option<i64>`
-- [ ] T003 Add stub match arms in the `handle_iris_doc` dispatch in
+- [X] T003 Add stub match arms in the `handle_iris_doc` dispatch in
       `crates/iris-agentic-dev-core/src/tools/doc.rs` for `DocMode::Fragment`,
       `DocMode::Compiled`, `DocMode::List` — return `not_implemented` JSON placeholder
-- [ ] T004 Add `iris_execute_method` stub tool handler function in
+- [X] T004 Add `iris_execute_method` stub tool handler function in
       `crates/iris-agentic-dev-core/src/tools/mod.rs` — define `IrisExecuteMethodParams`
       struct with `class`, `method`, `args`, `namespace` fields; stub returns `not_implemented`
-- [ ] T005 Route `"iris_execute_method"` in the tool dispatch match arm in
+- [X] T005 Route `"iris_execute_method"` in the tool dispatch match arm in
       `crates/iris-agentic-dev-core/src/tools/mod.rs`
-- [ ] T006 Add `"iris_execute_method"` to `registered_tool_names()` in
+- [X] T006 Add `"iris_execute_method"` to `registered_tool_names()` in
       `crates/iris-agentic-dev-core/src/tools/mod.rs`
-- [ ] T007 Add `iris_execute_method` → `ToolCategory::Execute` in `tool_to_category()` in
+- [X] T007 Add `iris_execute_method` → `ToolCategory::Execute` in `tool_to_category()` in
       `crates/iris-agentic-dev-core/src/iris/server_manager.rs`
-- [ ] T008 Add `iris_execute_method` to the `Toolset::Merged` tier in
+- [X] T008 Add `iris_execute_method` to the `Toolset::Merged` tier in
       `crates/iris-agentic-dev-core/src/tools/mod.rs` — add to both
       `with_registry_and_toolset()` Merged removal list AND confirm it is in
       `registered_tool_names()` (T006); these two lists must stay in sync
-- [ ] T009 Run `cargo build -p iris-agentic-dev-core` — confirm clean compile with stubs
+- [X] T009 Run `cargo build -p iris-agentic-dev-core` — confirm clean compile with stubs
 
 **Checkpoint**: New `DocMode` variants compile, `iris_execute_method` registered in Merged
 tier, routes to stubs, compiles clean.
@@ -51,16 +51,16 @@ tier, routes to stubs, compiles clean.
 **Purpose**: Fragment helper for line slicing + list pattern validation + clamp helpers.
 All needed before US implementations.
 
-- [ ] T010 Implement `clamp_max_results(v: i64) -> i64` helper in
+- [X] T010 Implement `clamp_max_results(v: i64) -> i64` helper in
       `crates/iris-agentic-dev-core/src/tools/doc.rs` — clamps to `[1, 1000]`
-- [ ] T011 Implement `validate_list_pattern(pattern: &str) -> Result<(), serde_json::Value>` in
+- [X] T011 Implement `validate_list_pattern(pattern: &str) -> Result<(), serde_json::Value>` in
       `crates/iris-agentic-dev-core/src/tools/doc.rs` — rejects empty string, bare `"*"`,
       `"**"`, or patterns starting with `*` with no preceding prefix; returns
       `MISSING_PARAMS` error JSON on failure
-- [ ] T012 Implement `slice_lines(lines: &[String], start: i64, end: i64) -> (Vec<String>, i64, i64, bool)` in
+- [X] T012 Implement `slice_lines(lines: &[String], start: i64, end: i64) -> (Vec<String>, i64, i64, bool)` in
       `crates/iris-agentic-dev-core/src/tools/doc.rs` — takes 1-based start/end, clamps end
       to `lines.len()`, returns `(sliced, actual_start, actual_end, was_clamped)`
-- [ ] T013 Run `cargo test -p iris-agentic-dev-core` — confirm all pre-existing tests still
+- [X] T013 Run `cargo test -p iris-agentic-dev-core` — confirm all pre-existing tests still
       pass after additions
 
 **Checkpoint**: Helper functions exist and compile. Pre-existing tests still green.
@@ -78,25 +78,25 @@ All needed before US implementations.
 
 > Write FIRST. Must FAIL before T020.
 
-- [ ] T014 [US1] Create `crates/iris-agentic-dev-core/tests/unit/test_iris_doc_depth_unit.rs` —
+- [X] T014 [US1] Create `crates/iris-agentic-dev-core/tests/unit/test_iris_doc_depth_unit.rs` —
       test `slice_lines`: `start=1, end=3` on 5-line array returns 3 lines, `actual_start=1`,
       `actual_end=3`, `clamped=false`
-- [ ] T015 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `slice_lines` with
+- [X] T015 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `slice_lines` with
       `end > len`: `end=999` on 5-line array returns all 5 lines with `clamped=true`,
       `actual_end=5`
-- [ ] T016 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `slice_lines` with
+- [X] T016 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `slice_lines` with
       `start > len`: returns empty vec, `clamped=true`
-- [ ] T017 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=fragment` with
+- [X] T017 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=fragment` with
       missing `start` param → structured error `MISSING_PARAMS` (not panic)
-- [ ] T018 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=fragment` with
+- [X] T018 [P] [US1] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=fragment` with
       `start > end` (e.g. `start=10, end=5`) → structured error `INVALID_PARAMS`
-- [ ] T019 [US1] Create `crates/iris-agentic-dev-core/tests/integration/test_iris_doc_depth_live.rs`
+- [X] T019 [US1] Create `crates/iris-agentic-dev-core/tests/integration/test_iris_doc_depth_live.rs`
       — `#[ignore]`; fetch `%Library.Integer.cls` fragment `start=1 end=5`, verify 5 strings
       returned, each non-empty
 
 ### Implementation for US1
 
-- [ ] T020 [US1] Implement `DocMode::Fragment` arm in `handle_iris_doc` in
+- [X] T020 [US1] Implement `DocMode::Fragment` arm in `handle_iris_doc` in
       `crates/iris-agentic-dev-core/src/tools/doc.rs`:
   - Validate `start` present (`MISSING_PARAMS` if absent), `end` present (`MISSING_PARAMS`
     if absent), `start >= 1` and `end >= start` (`INVALID_PARAMS` if violated)
@@ -105,7 +105,7 @@ All needed before US implementations.
   - Call `slice_lines(&lines, start, end)` to extract range
   - Return `{success: true, lines: Vec<String>, start: i64, end: i64, clamped: bool,
 total_lines: i64, name: String}`
-- [ ] T021 [US1] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1
+- [X] T021 [US1] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1
       unit tests pass
 
 **Checkpoint**: US1 complete. `iris_doc fragment` returns bounded line range.
@@ -124,20 +124,20 @@ a live IRIS with a compiled class. Verify INT content returned.
 
 > Write FIRST. Must FAIL before T027.
 
-- [ ] T022 [P] [US2] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=compiled` with
+- [X] T022 [P] [US2] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=compiled` with
       `name` ending `.INC` → structured error `NOT_COMPILED` (no INT form for include files)
-- [ ] T023 [P] [US2] Add unit test to `test_iris_doc_depth_unit.rs` — compiled INT name
+- [X] T023 [P] [US2] Add unit test to `test_iris_doc_depth_unit.rs` — compiled INT name
       derivation: `"MyClass.cls"` → `"MyClass.INT"`, `"MyRoutine.mac"` → `"MyRoutine.INT"`,
       case-insensitive extension matching
-- [ ] T024 [P] [US2] Add unit test to `test_iris_doc_depth_unit.rs` — `compiled_type`
+- [X] T024 [P] [US2] Add unit test to `test_iris_doc_depth_unit.rs` — `compiled_type`
       validation: `"INT"` and `"OBJ"` accepted; anything else → `INVALID_PARAMS`
-- [ ] T025 [US2] Add integration test to `test_iris_doc_depth_live.rs` — `#[ignore]`;
+- [X] T025 [US2] Add integration test to `test_iris_doc_depth_live.rs` — `#[ignore]`;
       fetch `%Library.Integer.cls` compiled form, verify content is non-empty and category
       field is `"INT"`
 
 ### Implementation for US2
 
-- [ ] T026 [US2] Implement `DocMode::Compiled` arm in `handle_iris_doc` in
+- [X] T026 [US2] Implement `DocMode::Compiled` arm in `handle_iris_doc` in
       `crates/iris-agentic-dev-core/src/tools/doc.rs`:
   - Return `NOT_COMPILED` immediately if `name` ends with `.inc` (case-insensitive)
   - Validate `compiled_type` if provided — only `"INT"` supported in v1 (OBJ deferred);
@@ -154,7 +154,7 @@ a live IRIS with a compiled class. Verify INT content returned.
     else collect lines until `DONE` sentinel
   - Return `{success: true, name: original_name, routine: derived_routine, category: "INT",
 content: String, total_lines: i64}` — join lines with `\n`
-- [ ] T027 [US2] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1+US2
+- [X] T027 [US2] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1+US2
       unit tests pass
 
 **Checkpoint**: US2 complete. `iris_doc compiled` returns INT representation.
@@ -173,21 +173,21 @@ on a live IRIS. Verify array of doc metadata objects returned.
 
 > Write FIRST. Must FAIL before T033.
 
-- [ ] T028 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `validate_list_pattern`
+- [X] T028 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `validate_list_pattern`
       accepts `"User.*"`, `"MyPkg.Sub*"`, `"Exact.Name.cls"`
-- [ ] T029 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `validate_list_pattern`
+- [X] T029 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `validate_list_pattern`
       rejects `""`, `"*"`, `"**"`, `"*.cls"` (star-only prefix) → `MISSING_PARAMS`
-- [ ] T030 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `clamp_max_results`:
+- [X] T030 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `clamp_max_results`:
       `9999` → `1000`, `0` → `1`, `200` → `200`
-- [ ] T031 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=list` missing
+- [X] T031 [P] [US3] Add unit test to `test_iris_doc_depth_unit.rs` — `mode=list` missing
       `pattern` → `MISSING_PARAMS`
-- [ ] T032 [US3] Add integration test to `test_iris_doc_depth_live.rs` — `#[ignore]`;
+- [X] T032 [US3] Add integration test to `test_iris_doc_depth_live.rs` — `#[ignore]`;
       list with `pattern="%Library.*"`, `category="CLS"`, `max_results=5`; verify response
       has `{success: true, documents: [...], count: 5, truncated: true}`
 
 ### Implementation for US3
 
-- [ ] T033 [US3] Implement `DocMode::List` arm in `handle_iris_doc` in
+- [X] T033 [US3] Implement `DocMode::List` arm in `handle_iris_doc` in
       `crates/iris-agentic-dev-core/src/tools/doc.rs`:
   - Validate `pattern` present via `validate_list_pattern` → `MISSING_PARAMS` on failure
   - Validate `category` if provided — allowed values: `"CLS"`, `"MAC"`, `"INT"`, `"INC"`,
@@ -201,7 +201,7 @@ on a live IRIS. Verify array of doc metadata objects returned.
   - Apply `max_results` cap, set `truncated` if capped
   - Return `{success: true, documents: [{name, category, ts}...],
 count: i64, truncated: bool, namespace: String}`
-- [ ] T034 [US3] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1–US3
+- [X] T034 [US3] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1–US3
       unit tests pass
 
 **Checkpoint**: US3 complete. `iris_doc list` enumerates docs with metadata and truncation.
@@ -219,21 +219,21 @@ count: i64, truncated: bool, namespace: String}`
 
 > Write FIRST. Must FAIL before T040.
 
-- [ ] T035 [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
+- [X] T035 [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
       missing `class` → `MISSING_PARAMS`
-- [ ] T036 [P] [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
+- [X] T036 [P] [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
       missing `method` → `MISSING_PARAMS`
-- [ ] T037 [P] [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
+- [X] T037 [P] [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
       on `mcpTemplate=live` → `ENV_GATE_BLOCKED` (Execute category blocked on live)
-- [ ] T038 [P] [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
+- [X] T038 [P] [US4] Add unit test to `test_iris_doc_depth_unit.rs` — `iris_execute_method`
       on `mcpTemplate=test` → `ENV_GATE_BLOCKED`
-- [ ] T039 [US4] Add integration test to `test_iris_doc_depth_live.rs` — `#[ignore]`;
+- [X] T039 [US4] Add integration test to `test_iris_doc_depth_live.rs` — `#[ignore]`;
       call `%Library.Integer:IsValid` with `args=["42"]`, verify `"1"` in result; call
       with `args=["not-an-int"]`, verify `"0"` in result
 
 ### Implementation for US4
 
-- [ ] T040 [US4] Implement `iris_execute_method` handler in
+- [X] T040 [US4] Implement `iris_execute_method` handler in
       `crates/iris-agentic-dev-core/src/tools/mod.rs`:
   - Parse `class` (required), `method` (required), `args: Vec<String>` (default `[]`),
     `namespace` (default connection default)
@@ -247,7 +247,7 @@ count: i64, truncated: bool, namespace: String}`
     - **No `{`/`}` in output** — plain string result only; document v1 limitation
   - Call `execute_via_generator(&code, &ns, client)`
   - Return `{success: true, return_value: String}` on success; `IRIS_EXECUTE_ERROR` on error
-- [ ] T041 [US4] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1–US4
+- [X] T041 [US4] Run `cargo test -p iris-agentic-dev-core test_iris_doc_depth` — all US1–US4
       unit tests pass
 
 **Checkpoint**: US4 complete. `iris_execute_method` invokes ClassMethod, Execute-gated.
@@ -258,17 +258,17 @@ count: i64, truncated: bool, namespace: String}`
 
 **Purpose**: Integration tests, tool inventory, AGENTS.md update, final fmt/clippy pass.
 
-- [ ] T042 [P] Verify `iris_execute_method` appears in `check_config` tool inventory —
+- [X] T042 [P] Verify `iris_execute_method` appears in `check_config` tool inventory —
       add assertion to `crates/iris-agentic-dev-core/tests/unit/test_server_manager.rs`
       that `registered_tool_names()` contains `"iris_execute_method"`
-- [ ] T043 [P] Update `light-skills/AGENTS.md` — add `iris_doc` mode extensions
+- [X] T043 [P] Update `light-skills/AGENTS.md` — add `iris_doc` mode extensions
       (`fragment`, `compiled`, `list`) and `iris_execute_method` to the MCP tool reference
       section with usage examples for each mode
-- [ ] T044 Run full test suite: `cargo test -p iris-agentic-dev-core` — all non-ignored
+- [X] T044 Run full test suite: `cargo test -p iris-agentic-dev-core` — all non-ignored
       tests pass, zero regressions
-- [ ] T045 Run `cargo fmt --all -- --check` — no formatting diff
-- [ ] T046 Run `cargo clippy -p iris-agentic-dev-core -- -D warnings` — zero warnings
-- [ ] T047 [P] Update spec status to `Status: Implemented` in
+- [X] T045 Run `cargo fmt --all -- --check` — no formatting diff
+- [X] T046 Run `cargo clippy -p iris-agentic-dev-core -- -D warnings` — zero warnings
+- [X] T047 [P] Update spec status to `Status: Implemented` in
       `specs/053-doc-depth/spec.md`
 
 ---

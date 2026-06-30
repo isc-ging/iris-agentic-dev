@@ -213,20 +213,27 @@ fn test_merged_excludes_original_interop_production_tools() {
     }
 }
 
-/// Merged must have exactly 34 tools (added iris_global in 052-iris-global).
+/// Merged must have exactly 35 tools (added iris_execute_method in 053-doc-depth).
 #[test]
 fn test_merged_tool_count_is_23() {
     let tools = IrisTools::new_with_toolset(None, Toolset::Merged).expect("IrisTools::new");
     let count = tools.registered_tool_names().len();
     assert_eq!(
-        count, 34,
-        "Merged toolset must have exactly 34 tools, got {}",
+        count, 35,
+        "Merged toolset must have exactly 35 tools, got {}",
         count
     );
     // iris_get_log must be registered in Merged (027-progressive-disclosure)
     assert!(
         tools.registered_tool_names().contains("iris_get_log"),
         "iris_get_log must appear in Merged toolset"
+    );
+    // iris_execute_method must be registered in Merged (053-doc-depth)
+    assert!(
+        tools
+            .registered_tool_names()
+            .contains("iris_execute_method"),
+        "iris_execute_method must appear in Merged toolset"
     );
 }
 

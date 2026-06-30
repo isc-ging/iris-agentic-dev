@@ -109,6 +109,23 @@ iris_global(action="kill", global_name="MyApp", subscripts=["key1"])
 iris_global(action="list", global_name="MyApp", max_subscripts=50)
 # PHI globals require explicit acknowledgement:
 iris_global(action="get", global_name="PAPMI", subscripts=["123"], acknowledgePhi=true)
+
+# Read a specific line range from a large class (mode=fragment — no full fetch needed)
+iris_doc(mode="fragment", name="MyApp.BigClass.cls", start=50, end=70)
+
+# Fetch the compiled INT representation (for macro expansion / stack trace correlation)
+iris_doc(mode="compiled", name="MyApp.Patient.cls")
+iris_doc(mode="compiled", name="MyRoutine.mac")
+
+# Enumerate documents in a package (mode=list — metadata only, no source fetch)
+iris_doc(mode="list", pattern="MyApp.*", category="CLS", max_results=50)
+iris_doc(mode="list", pattern="MyApp.*")          # category defaults to ALL
+iris_doc(mode="list", pattern="%Library.*", category="CLS", max_results=5)
+
+# Invoke a ClassMethod directly (Merged tier only, Execute-gated: blocked on live/test)
+iris_execute_method(class="%SYSTEM.Version", method="GetVersion")
+iris_execute_method(class="MyApp.Utils", method="FormatDate", args=["2026-01-01"])
+iris_execute_method(class="%Library.Integer", method="IsValid", args=["42"])
 ```
 
 **Do NOT use `docker exec` / `docker cp` / `iris session` bash commands when the MCP is connected.** The MCP handles container targeting automatically after `iris_select_container`.
@@ -121,7 +138,13 @@ To read the source of any class — including system classes like `%ASQ.Engine` 
 # Option 1 (preferred): docs_introspect — returns parsed method signatures
 docs_introspect(class_name="%ASQ.Engine")
 
-# Option 2: export via OBJ then read — use when you need full source with macros
+# Option 2: iris_doc fragment — read a specific line range without full fetch
+iris_doc(mode="fragment", name="%ASQ.Engine.cls", start=1, end=50)
+
+# Option 3: iris_doc compiled — fetch the compiled INT (for macro expansion / stack traces)
+iris_doc(mode="compiled", name="%ASQ.Engine.cls")
+
+# Option 4: export via OBJ then read — use when you need full source with macros
 # Run in bash:
 docker exec <container> iris session IRIS -U USER \
   "set sc = \$system.OBJ.ExportUDL(\"%ASQ.Engine.cls\",\"/tmp/ASQEngine.cls\") halt"
