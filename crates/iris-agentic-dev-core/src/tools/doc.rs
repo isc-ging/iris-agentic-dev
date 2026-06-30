@@ -11,6 +11,9 @@ pub enum DocMode {
     Put,
     Delete,
     Head,
+    Fragment,
+    Compiled,
+    List,
 }
 
 fn default_mode() -> DocMode {
@@ -40,6 +43,21 @@ pub struct IrisDocParams {
     /// Saves a round-trip vs calling iris_doc(put) then iris_compile separately.
     #[serde(default)]
     pub compile: bool,
+    // mode=fragment params
+    /// Fragment start line, 1-based inclusive (required for mode=fragment)
+    pub start: Option<i64>,
+    /// Fragment end line, 1-based inclusive (required for mode=fragment)
+    pub end: Option<i64>,
+    // mode=compiled params
+    /// Compiled form type: "INT" (default) or "OBJ"
+    pub compiled_type: Option<String>,
+    // mode=list params
+    /// Glob pattern for mode=list (required, e.g. "User.*" or "MyApp.*.cls")
+    pub pattern: Option<String>,
+    /// Document category filter: "CLS", "MAC", "INT", "INC", or "ALL" (default "ALL")
+    pub category: Option<String>,
+    /// Max results for mode=list (default 200, max 1000)
+    pub max_results: Option<i64>,
 }
 
 fn default_namespace() -> String {
@@ -89,6 +107,9 @@ pub async fn handle_iris_doc(
         DocMode::Put => handle_put(iris, client, p, elicitation_store).await,
         DocMode::Delete => handle_delete(iris, client, p).await,
         DocMode::Head => handle_head(iris, client, p).await,
+        DocMode::Fragment => handle_fragment(iris, client, p).await,
+        DocMode::Compiled => handle_compiled(iris, client, p).await,
+        DocMode::List => handle_list(iris, client, p).await,
     }
 }
 
@@ -467,6 +488,413 @@ async fn handle_head(
         .unwrap_or("")
         .to_string();
     ok_json(serde_json::json!({"success": true, "name": name, "exists": exists, "timestamp": ts}))
+}
+
+// ── Phase 2: Foundational helpers ────────────────────────────────────────────
+
+/// Clamp max_results to [1, 1000].
+pub fn clamp_max_results(v: i64) -> i64 {
+    v.clamp(1, 1000)
+}
+
+/// Validate a glob pattern for mode=list.
+/// Rejects empty string, bare "*", "**", or patterns starting with "*" (no prefix).
+pub fn validate_list_pattern(pattern: &str) -> Result<(), serde_json::Value> {
+    if pattern.is_empty() || pattern == "*" || pattern == "**" || pattern.starts_with('*') {
+        return Err(serde_json::json!({
+            "success": false,
+            "error_code": "MISSING_PARAMS",
+            "error": "pattern must have a non-wildcard prefix (e.g. 'User.*', 'MyApp.*.cls')"
+        }));
+    }
+    Ok(())
+}
+
+/// Slice a line array by 1-based start/end range.
+/// Returns (sliced_lines, actual_start, actual_end, was_clamped).
+pub fn slice_lines(lines: &[String], start: i64, end: i64) -> (Vec<String>, i64, i64, bool) {
+    let len = lines.len() as i64;
+    if len == 0 || start > len {
+        return (vec![], start, start, true);
+    }
+    let actual_start = start.max(1);
+    let actual_end_raw = end;
+    let actual_end = actual_end_raw.min(len);
+    let clamped = actual_end < actual_end_raw;
+    let s = (actual_start - 1) as usize;
+    let e = actual_end as usize;
+    (lines[s..e].to_vec(), actual_start, actual_end, clamped)
+}
+
+// ── Phase 3: mode=fragment ────────────────────────────────────────────────────
+
+async fn handle_fragment(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    p: IrisDocParams,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let name = p.name.as_deref().unwrap_or("");
+    let start = match p.start {
+        Some(v) => v.max(1),
+        None => return err_json("MISSING_PARAMS", "start is required for mode=fragment"),
+    };
+    let end = match p.end {
+        Some(v) => v,
+        None => return err_json("MISSING_PARAMS", "end is required for mode=fragment"),
+    };
+    if end < start {
+        return err_json(
+            "INVALID_PARAMS",
+            &format!("start ({start}) must be <= end ({end})"),
+        );
+    }
+
+    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(name)));
+    let resp = client
+        .get(&url)
+        .basic_auth(&iris.username, Some(&iris.password))
+        .send()
+        .await
+        .map_err(|e| rmcp::ErrorData::internal_error(format!("HTTP error: {e}"), None))?;
+
+    let status = resp.status();
+    if status.as_u16() == 404 {
+        return err_json("NOT_FOUND", &format!("Document not found: {name}"));
+    }
+    if !status.is_success() {
+        let body_hint = resp.text().await.unwrap_or_default();
+        return http_err_json(status, body_hint.trim());
+    }
+
+    let body: serde_json::Value = resp.json().await.unwrap_or_default();
+    let all_lines: Vec<String> = body["result"]["content"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let total_lines = all_lines.len() as i64;
+    let (sliced, actual_start, actual_end, clamped) = slice_lines(&all_lines, start, end);
+    ok_json(serde_json::json!({
+        "success": true,
+        "name": name,
+        "lines": sliced,
+        "start": actual_start,
+        "end": actual_end,
+        "clamped": clamped,
+        "total_lines": total_lines,
+    }))
+}
+
+// ── Phase 4: mode=compiled ────────────────────────────────────────────────────
+
+/// Derive the IRIS routine name from a document name.
+/// .cls → strip extension, append ".1"
+/// .mac → strip extension
+/// .int → use as-is (strip extension)
+/// .inc → None (no INT form)
+fn derive_routine_name(name: &str) -> Option<String> {
+    let lower = name.to_lowercase();
+    if lower.ends_with(".inc") {
+        return None; // include files have no INT form
+    }
+    if lower.ends_with(".cls") {
+        let base = &name[..name.len() - 4];
+        return Some(format!("{base}.1"));
+    }
+    if lower.ends_with(".mac") {
+        return Some(name[..name.len() - 4].to_string());
+    }
+    if lower.ends_with(".int") {
+        return Some(name[..name.len() - 4].to_string());
+    }
+    // Unknown extension — try stripping it
+    if let Some(dot) = name.rfind('.') {
+        Some(name[..dot].to_string())
+    } else {
+        Some(name.to_string())
+    }
+}
+
+async fn handle_compiled(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    p: IrisDocParams,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let name = p.name.as_deref().unwrap_or("");
+    let lower = name.to_lowercase();
+
+    // .INC files have no INT form
+    if lower.ends_with(".inc") {
+        return err_json(
+            "NOT_COMPILED",
+            "Include files (.INC) do not compile to INT form",
+        );
+    }
+
+    // Validate compiled_type
+    if let Some(ref ct) = p.compiled_type {
+        if ct.to_uppercase() != "INT" {
+            // OBJ is not yet implemented; any other value is invalid
+            return err_json(
+                "INVALID_PARAMS",
+                &format!("compiled_type '{ct}' not supported; only 'INT' is supported in v1"),
+            );
+        }
+    }
+
+    let routine = match derive_routine_name(name) {
+        Some(r) => r,
+        None => {
+            return err_json(
+                "NOT_COMPILED",
+                "Cannot determine routine name for this document type",
+            )
+        }
+    };
+
+    let code = format!(
+        " Set rtn = ##class(%Library.Routine).%OpenId(\"{routine}.INT\")\n If rtn = \"\" {{ Write \"NOT_COMPILED\",$C(10)  Quit }}\n Do rtn.Rewind()\n While 'rtn.AtEnd {{ Write rtn.ReadLine(),$C(10) }}\n Write \"DONE\",$C(10)"
+    );
+
+    let output = match iris
+        .execute_via_generator(&code, &p.namespace, client)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => return err_json("IRIS_EXECUTE_ERROR", &e.to_string()),
+    };
+
+    let first_line = output.lines().next().unwrap_or("").trim();
+    if first_line == "NOT_COMPILED" {
+        return err_json(
+            "NOT_COMPILED",
+            &format!("No compiled INT form found for '{name}'"),
+        );
+    }
+
+    // Collect lines until DONE sentinel
+    let mut content_lines: Vec<&str> = Vec::new();
+    for line in output.lines() {
+        if line.trim() == "DONE" {
+            break;
+        }
+        content_lines.push(line);
+    }
+    let content = content_lines.join("\n");
+    let total_lines = content_lines.len() as i64;
+
+    ok_json(serde_json::json!({
+        "success": true,
+        "name": name,
+        "routine": routine,
+        "category": "INT",
+        "content": content,
+        "total_lines": total_lines,
+    }))
+}
+
+// ── Phase 5: mode=list ────────────────────────────────────────────────────────
+
+/// Convert a glob pattern to a regex string.
+/// * → .*, ? → ., dots escaped.
+fn glob_to_regex(pattern: &str) -> String {
+    let mut re = String::from("(?i)^");
+    for ch in pattern.chars() {
+        match ch {
+            '*' => re.push_str(".*"),
+            '?' => re.push('.'),
+            '.' => re.push_str("\\."),
+            c => re.push(c),
+        }
+    }
+    re.push('$');
+    re
+}
+
+async fn fetch_docnames_for_cat(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    namespace: &str,
+    cat: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let url = iris.versioned_ns_url(namespace, &format!("/docnames/{cat}"));
+    let resp = client
+        .get(&url)
+        .basic_auth(&iris.username, Some(&iris.password))
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let body: serde_json::Value = resp.json().await.unwrap_or_default();
+    let docs = body["result"]["content"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    Ok(docs)
+}
+
+async fn handle_list(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    p: IrisDocParams,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let pattern = match p.pattern.as_deref() {
+        Some(pat) => pat,
+        None => return err_json("MISSING_PARAMS", "pattern is required for mode=list"),
+    };
+
+    if let Err(e) = validate_list_pattern(pattern) {
+        return ok_json(e);
+    }
+
+    let category = p.category.as_deref().unwrap_or("ALL").to_uppercase();
+    let allowed = ["CLS", "MAC", "INT", "INC", "ALL"];
+    if !allowed.contains(&category.as_str()) {
+        return err_json(
+            "INVALID_PARAMS",
+            &format!("category '{category}' not valid; use CLS, MAC, INT, INC, or ALL"),
+        );
+    }
+
+    let max_results = clamp_max_results(p.max_results.unwrap_or(200));
+
+    // Fetch docs for selected categories
+    let cats: &[&str] = if category == "ALL" {
+        &["CLS", "MAC", "INT", "INC"]
+    } else {
+        // We'll build a single-element slice from the string
+        match category.as_str() {
+            "CLS" => &["CLS"],
+            "MAC" => &["MAC"],
+            "INT" => &["INT"],
+            "INC" => &["INC"],
+            _ => &["CLS"],
+        }
+    };
+
+    let re_str = glob_to_regex(pattern);
+    let re = match regex::Regex::new(&re_str) {
+        Ok(r) => r,
+        Err(e) => {
+            return err_json(
+                "INVALID_PARAMS",
+                &format!("invalid pattern '{pattern}': {e}"),
+            )
+        }
+    };
+
+    let mut all_docs: Vec<serde_json::Value> = Vec::new();
+    for cat in cats {
+        match fetch_docnames_for_cat(iris, client, &p.namespace, cat).await {
+            Ok(docs) => all_docs.extend(docs),
+            Err(e) => {
+                return err_json(
+                    "SERVER_ERROR",
+                    &format!("failed to fetch {cat} docnames: {e}"),
+                )
+            }
+        }
+    }
+
+    // Filter by pattern
+    let mut matched: Vec<serde_json::Value> = all_docs
+        .into_iter()
+        .filter(|doc| {
+            doc["name"]
+                .as_str()
+                .map(|n| re.is_match(n))
+                .unwrap_or(false)
+        })
+        .map(|doc| {
+            serde_json::json!({
+                "name": doc["name"],
+                "category": doc["cat"],
+                "ts": doc["ts"],
+            })
+        })
+        .collect();
+
+    let total = matched.len();
+    let truncated = total > max_results as usize;
+    matched.truncate(max_results as usize);
+    let count = matched.len() as i64;
+
+    ok_json(serde_json::json!({
+        "success": true,
+        "documents": matched,
+        "count": count,
+        "truncated": truncated,
+        "namespace": p.namespace,
+    }))
+}
+
+// ── 053: iris_execute_method handler ─────────────────────────────────────────
+
+pub async fn handle_iris_execute_method(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    p: &crate::tools::IrisExecuteMethodParams,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let class = &p.class;
+    let method = &p.method;
+
+    // Injection guard: reject class/method containing { } or ;
+    for ch in ['{', '}', ';'] {
+        if class.contains(ch) || method.contains(ch) {
+            return err_json(
+                "INVALID_PARAMS",
+                "class and method names must not contain '{', '}', or ';'",
+            );
+        }
+    }
+
+    // Build CSV args with ObjectScript double-quote escaping
+    let args_csv: String = p
+        .args
+        .iter()
+        .map(|a| format!("\"{}\"", a.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let call_expr = if args_csv.is_empty() {
+        format!("##class({class}).{method}()")
+    } else {
+        format!("##class({class}).{method}({args_csv})")
+    };
+
+    let code = format!(" Set result = {call_expr}\n Write result,$C(10)");
+
+    let output = match iris
+        .execute_via_generator(&code, &p.namespace, client)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = e.to_string();
+            return err_json("IRIS_EXECUTE_ERROR", &msg);
+        }
+    };
+
+    // Check for generator-level errors (Catch block writes "ERROR: ...")
+    let trimmed = output.trim();
+    if let Some(stripped) = trimmed.strip_prefix("ERROR: ") {
+        return err_json("IRIS_EXECUTE_ERROR", stripped.trim());
+    }
+
+    // Take first line only — the method may write side-effects on subsequent lines
+    let return_value = output.lines().next().unwrap_or("").to_string();
+
+    ok_json(serde_json::json!({
+        "success": true,
+        "return_value": return_value,
+    }))
 }
 
 /// Strip `Storage Name { ... }` blocks from ObjectScript class content.

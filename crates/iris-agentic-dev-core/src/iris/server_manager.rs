@@ -434,6 +434,8 @@ fn tool_to_category(tool_name: &str) -> Option<crate::iris::workspace_config::To
         "kb_recall" | "kb_index" => ToolCategory::Kb,
         // 052: get/list are Query; set/kill override to Execute in check_env_gate
         "iris_global" => ToolCategory::Query,
+        // 053: iris_execute_method is Execute-gated (blocked on live/test templates)
+        "iris_execute_method" => ToolCategory::Execute,
         _ => return None, // unknown tool — not gated
     })
 }

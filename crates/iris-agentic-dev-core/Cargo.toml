@@ -238,6 +238,11 @@ path = "tests/integration/test_iris_global_live.rs"
 required-features = ["testing"]
 
 [[test]]
+name = "test_iris_doc_depth_live"
+path = "tests/integration/test_iris_doc_depth_live.rs"
+required-features = ["testing"]
+
+[[test]]
 name = "test_server_manager"
 path = "tests/unit/test_server_manager.rs"
 
@@ -264,6 +269,10 @@ path = "tests/unit/test_system_blocklist.rs"
 [[test]]
 name = "test_iris_global_unit"
 path = "tests/unit/test_iris_global_unit.rs"
+
+[[test]]
+name = "test_iris_doc_depth_unit"
+path = "tests/unit/test_iris_doc_depth_unit.rs"
 
 [[test]]
 name = "test_audit_phi_scrub"
