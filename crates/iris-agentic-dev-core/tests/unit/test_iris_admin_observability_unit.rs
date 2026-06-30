@@ -396,3 +396,37 @@ fn database_status_unmounted_entry_parses_safely() {
     assert_eq!(entry["mounted"], false);
     assert_eq!(entry["free_space_mb"], 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// iso8601_to_iris_timestamp: ISO 8601 -> IRIS %TimeStamp string conversion
+// ---------------------------------------------------------------------------
+
+#[test]
+fn iso8601_to_iris_timestamp_strips_z_and_replaces_t() {
+    let out = iris_agentic_dev_core::tools::observability::iso8601_to_iris_timestamp(
+        "2026-06-29T10:00:00Z",
+    );
+    assert_eq!(out, "2026-06-29 10:00:00");
+}
+
+#[test]
+fn iso8601_to_iris_timestamp_no_trailing_z() {
+    let out = iris_agentic_dev_core::tools::observability::iso8601_to_iris_timestamp(
+        "2026-06-29T10:00:00",
+    );
+    assert_eq!(out, "2026-06-29 10:00:00");
+}
+
+#[test]
+fn iso8601_to_iris_timestamp_empty_string() {
+    let out = iris_agentic_dev_core::tools::observability::iso8601_to_iris_timestamp("");
+    assert_eq!(out, "");
+}
+
+#[test]
+fn iso8601_to_iris_timestamp_trims_whitespace() {
+    let out = iris_agentic_dev_core::tools::observability::iso8601_to_iris_timestamp(
+        "  2026-06-29T10:00:00Z  ",
+    );
+    assert_eq!(out, "2026-06-29 10:00:00");
+}

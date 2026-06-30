@@ -205,42 +205,55 @@ pub async fn journal_search_impl(
     let client = IrisConnection::http_client()
         .map_err(|_| McpError::invalid_request("IRIS_UNREACHABLE", None))?;
 
-    // Build ObjectScript to call %SYS.Journal.File:Search named query
-    // Column names verified at runtime — Search query is the documented API
-    let pattern_filter = global_pattern
+    // %SYS.Journal.Record has no SQL projection (verified: SELECT FROM it -> SQLCODE -30).
+    // The real API is the %SYS.Journal.File:Search class query: Search(String, FileName,
+    // Offset, Backward) -> Offset. It does substring matching (no glob wildcards), so we
+    // strip wildcard characters from the pattern and pass the longest literal substring;
+    // glob filtering is then applied client-side on the resolved GlobalReference.
+    let search_term = global_pattern
         .filter(|s| !s.is_empty())
-        .map(glob_to_sql_like)
+        .map(|s| s.replace(['*', '?'], ""))
+        .filter(|s| !s.is_empty())
         .unwrap_or_default();
     let from_ts = time_range
         .and_then(|tr| tr.get("from"))
         .and_then(|v| v.as_str())
-        .unwrap_or("");
+        .map(iso8601_to_iris_timestamp)
+        .unwrap_or_default();
     let to_ts = time_range
         .and_then(|tr| tr.get("to"))
         .and_then(|v| v.as_str())
-        .unwrap_or("");
+        .map(iso8601_to_iris_timestamp)
+        .unwrap_or_default();
 
-    // Use %SYS.Journal.File:Search named query
-    // Args: (JournalFile, StartAddress, EndAddress, GlobalFilter, MaxRecords)
-    // Empty string for JournalFile = current journal
     let code = format!(
-        r#"Set tRS=##class(%ResultSet).%New("%SYS.Journal.File:Search")
-Set tSC=tRS.Execute("","","","{pattern}",{cap})
+        r#"Set tFile=##class(%SYS.Journal.System).GetCurrentFile()
+Set tFirst=tFile.FirstRecordGet()
+If '$IsObject(tFirst) {{ Write "COUNT:0" Quit }}
+Set tRS=##class(%ResultSet).%New("%SYS.Journal.File:Search")
+Set tSC=tRS.Execute("{search}",tFile.Name,tFirst.Address,0)
 If $$$ISERR(tSC) {{ Write "ERROR:"_$System.Status.GetErrorText(tSC) Quit }}
 Set tCount=0
 While tRS.Next() && (tCount<{cap}) {{
-  Set tFrom="{from_ts}" Set tTo="{to_ts}"
-  Set tTS=tRS.GetData(4)
-  If (tFrom'="")&&(tTS<tFrom) {{ Continue }}
-  If (tTo'="")&&(tTS>tTo) {{ Continue }}
-  Write tRS.GetData(1),"|",tRS.GetData(2),"|",tRS.GetData(3),"|",tTS,"|",tRS.GetData(5),!
+  Set tAddr=tRS.GetData(1)
+  Set tRec=tFile.GetRecordAt(tAddr)
+  Continue:'$IsObject(tRec)
+  Set tTS=tRec.TimeStamp
+  Continue:("{from}"'="")&&(tTS<"{from}")
+  Continue:("{to}"'="")&&(tTS>"{to}")
+  Set tGlobalRef="" Set tValue=""
+  If tRec.%IsA("%SYS.Journal.SetKillRecord") {{
+    Set tGlobalRef=tRec.GlobalReference
+    Set tValue=tRec.NewValue
+  }}
+  Write tGlobalRef,"|",tRec.ProcessID,"|",tRec.TypeName,"|",tTS,"|",tValue,!
   Set tCount=tCount+1
 }}
 Write "COUNT:"_tCount,!"#,
-        pattern = pattern_filter.replace('"', "\"\""),
+        search = search_term.replace('"', "\"\""),
         cap = cap,
-        from_ts = from_ts,
-        to_ts = to_ts,
+        from = from_ts,
+        to = to_ts,
     );
     match iris.execute_via_generator(&code, "%SYS", &client).await {
         Ok(out) => {
@@ -255,8 +268,9 @@ Write "COUNT:"_tCount,!"#,
                     result_count = n.trim().parse().unwrap_or(0);
                 } else if !line.is_empty() {
                     let p: Vec<&str> = line.splitn(5, '|').collect();
+                    let global_ref = p.first().copied().unwrap_or("");
                     records.push(serde_json::json!({
-                        "global_ref":      p.first().copied().unwrap_or(""),
+                        "global_ref":      global_ref,
                         "transaction_id":  p.get(1).copied().unwrap_or(""),
                         "operation":       p.get(2).copied().unwrap_or(""),
                         "timestamp":       p.get(3).copied().unwrap_or(""),
@@ -274,6 +288,14 @@ Write "COUNT:"_tCount,!"#,
         }
         Err(e) => err_json("IRIS_UNREACHABLE", &e.to_string()),
     }
+}
+
+/// Convert an ISO 8601 timestamp ("2026-06-29T10:00:00Z") to IRIS %TimeStamp
+/// format ("2026-06-29 10:00:00") for string comparison against journal record
+/// TimeStamp values. Returns empty string for empty/unparseable input.
+pub fn iso8601_to_iris_timestamp(iso: &str) -> String {
+    let trimmed = iso.trim().trim_end_matches('Z');
+    trimmed.replacen('T', " ", 1)
 }
 
 // ── US4: namespace_mappings ───────────────────────────────────────────────────

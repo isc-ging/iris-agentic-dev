@@ -3,6 +3,7 @@
 //! All tests are #[ignore] — run with:
 //!   cargo test -p iris-agentic-dev-core --features testing --test test_iris_admin_observability_live -- --ignored
 
+use iris_agentic_dev_core::iris::connection::DiscoverySource;
 use iris_agentic_dev_core::iris::IrisConnection;
 
 /// Parse first text content from a CallToolResult into JSON.
@@ -16,7 +17,7 @@ fn parse_result(result: rmcp::model::CallToolResult) -> serde_json::Value {
 }
 
 /// Open a live %SYS-capable IRIS connection from env vars.
-async fn live_iris() -> Option<IrisConnection> {
+fn live_iris() -> Option<IrisConnection> {
     let host = std::env::var("IRIS_HOST").unwrap_or_else(|_| "localhost".into());
     let port: u16 = std::env::var("IRIS_PORT")
         .ok()
@@ -24,14 +25,13 @@ async fn live_iris() -> Option<IrisConnection> {
         .unwrap_or(52780);
     let user = std::env::var("IRIS_USERNAME").unwrap_or_else(|_| "_SYSTEM".into());
     let pass = std::env::var("IRIS_PASSWORD").unwrap_or_else(|_| "SYS".into());
-    IrisConnection::new(
-        &format!("http://{}:{}/api/atelier/", host, port),
-        &user,
-        &pass,
+    Some(IrisConnection::new(
+        format!("http://{}:{}", host, port),
         "%SYS",
-    )
-    .await
-    .ok()
+        user,
+        pass,
+        DiscoverySource::EnvVar,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ async fn live_iris() -> Option<IrisConnection> {
 #[tokio::test]
 #[ignore]
 async fn live_view_locks_returns_success() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result = iris_agentic_dev_core::tools::observability::view_locks_impl(iris.as_ref())
         .await
         .expect("Ok");
@@ -57,7 +57,7 @@ async fn live_view_locks_returns_success() {
 #[tokio::test]
 #[ignore]
 async fn live_view_processes_allow_returns_success() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result = iris_agentic_dev_core::tools::observability::view_processes_impl(
         iris.as_ref(),
         "allow",
@@ -77,7 +77,7 @@ async fn live_view_processes_allow_returns_success() {
 #[tokio::test]
 #[ignore]
 async fn live_view_processes_redact_hides_phi() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result = iris_agentic_dev_core::tools::observability::view_processes_impl(
         iris.as_ref(),
         "redact",
@@ -101,7 +101,7 @@ async fn live_view_processes_redact_hides_phi() {
 #[tokio::test]
 #[ignore]
 async fn live_journal_search_with_pattern_returns_success() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result = iris_agentic_dev_core::tools::observability::journal_search_impl(
         iris.as_ref(),
         "allow",
@@ -123,7 +123,7 @@ async fn live_journal_search_with_pattern_returns_success() {
 #[tokio::test]
 #[ignore]
 async fn live_namespace_mappings_user_ns_returns_success() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result = iris_agentic_dev_core::tools::observability::namespace_mappings_impl(
         iris.as_ref(),
         Some("USER"),
@@ -133,15 +133,15 @@ async fn live_namespace_mappings_user_ns_returns_success() {
     .expect("Ok");
     let v = parse_result(result);
     assert_eq!(v["success"], true, "namespace_mappings failed: {v}");
-    assert!(v["globals"].is_array());
-    assert!(v["packages"].is_array());
-    assert!(v["routines"].is_array());
+    assert!(v["mappings"]["globals"].is_array());
+    assert!(v["mappings"]["packages"].is_array());
+    assert!(v["mappings"]["routines"].is_array());
 }
 
 #[tokio::test]
 #[ignore]
 async fn live_namespace_mappings_nonexistent_returns_not_found() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result = iris_agentic_dev_core::tools::observability::namespace_mappings_impl(
         iris.as_ref(),
         Some("DOESNOTEXIST99"),
@@ -160,7 +160,7 @@ async fn live_namespace_mappings_nonexistent_returns_not_found() {
 #[tokio::test]
 #[ignore]
 async fn live_database_status_all_returns_success() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result =
         iris_agentic_dev_core::tools::observability::database_status_impl(iris.as_ref(), None)
             .await
@@ -180,7 +180,7 @@ async fn live_database_status_all_returns_success() {
 #[tokio::test]
 #[ignore]
 async fn live_database_status_nonexistent_returns_not_found() {
-    let iris = live_iris().await;
+    let iris = live_iris();
     let result = iris_agentic_dev_core::tools::observability::database_status_impl(
         iris.as_ref(),
         Some("DOESNOTEXIST99"),
