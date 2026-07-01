@@ -436,6 +436,10 @@ fn tool_to_category(tool_name: &str) -> Option<crate::iris::workspace_config::To
         "iris_global" => ToolCategory::Query,
         // 053: iris_execute_method is Execute-gated (blocked on live/test templates)
         "iris_execute_method" => ToolCategory::Execute,
+        // 056-interop-depth: all three are read-only
+        "iris_message_body" | "iris_business_rule_info" | "iris_production_diff" => {
+            ToolCategory::Query
+        }
         _ => return None, // unknown tool — not gated
     })
 }

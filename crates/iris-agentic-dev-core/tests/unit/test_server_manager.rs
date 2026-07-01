@@ -641,6 +641,25 @@ fn iris_execute_method_in_registered_tool_names() {
     );
 }
 
+// ── T040: 056-interop-depth tools appear in check_config tool inventory ───────
+
+#[test]
+fn interop_depth_tools_in_registered_tool_names() {
+    use iris_agentic_dev_core::tools::{IrisTools, Toolset};
+    let tools = IrisTools::new_with_toolset(None, Toolset::Merged).expect("IrisTools::new");
+    let names = tools.registered_tool_names();
+    for name in [
+        "iris_message_body",
+        "iris_business_rule_info",
+        "iris_production_diff",
+    ] {
+        assert!(
+            names.contains(name),
+            "{name} must appear in Merged toolset registered_tool_names()"
+        );
+    }
+}
+
 // ── Additional coverage for parse_sm_settings nested paths ────────────────────
 
 #[test]

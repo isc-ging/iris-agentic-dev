@@ -1527,6 +1527,10 @@ impl IrisTools {
             "iris_global",
             // 053-doc-depth
             "iris_execute_method",
+            // 056-interop-depth
+            "iris_message_body",
+            "iris_business_rule_info",
+            "iris_production_diff",
         ];
 
         let mut names: std::collections::HashSet<String> =
@@ -1627,6 +1631,10 @@ impl IrisTools {
                 "iris_global",
                 // 053-doc-depth
                 "iris_execute_method",
+                // 056-interop-depth
+                "iris_message_body",
+                "iris_business_rule_info",
+                "iris_production_diff",
             ];
             for name in merged_only {
                 router.remove_route(name);
@@ -4800,6 +4808,149 @@ Methods:
         result
     }
 
+    // ─── 056-interop-depth ───
+
+    #[tool(
+        description = "Read an Ensemble/Interoperability message body by message ID. Handles plain-text and stream-backed bodies (Ens.StreamContainer, %Stream.Object). PHI-gated: dataPolicy=block returns PHI_POLICY_BLOCKED; dataPolicy=allow requires acknowledgePhi=true; dataPolicy=redact scrubs HL7 v2 PID/MSH fields. max_bytes default 65536, clamped to 1048576."
+    )]
+    async fn iris_message_body(
+        &self,
+        Parameters(p): Parameters<AnyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let message_id = p
+            .get("message_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if message_id.is_empty() {
+            return err_json("INVALID_PARAMS", "message_id is required");
+        }
+        let namespace = p
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("USER")
+            .to_string();
+        let max_bytes = p
+            .get("max_bytes")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32)
+            .unwrap_or(65536);
+        let acknowledge_phi = p
+            .get("acknowledgePhi")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let data_policy = p
+            .get("dataPolicy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("block")
+            .to_string();
+        let (sm_server, policy) = self.active_server_manager_policy();
+        let params_json = serde_json::json!({ "namespace": namespace });
+        if let Err(gate) = crate::policy::gate::dispatch_gate(
+            "iris_message_body",
+            sm_server.as_deref().unwrap_or(""),
+            policy.as_ref(),
+            &params_json,
+        ) {
+            return ok_json(gate);
+        }
+        let result = interop::handle_iris_message_body(
+            self.iris_arc().as_deref(),
+            &interop::MessageBodyParams {
+                message_id,
+                namespace,
+                max_bytes,
+                acknowledge_phi,
+            },
+            &data_policy,
+        )
+        .await;
+        self.record_call("iris_message_body", result.is_ok());
+        result
+    }
+
+    #[tool(
+        description = "List or inspect Ensemble business rules (Ens.Rule.RuleSet). action=list returns all rule sets with name/description/modified. action=get with rule_name returns conditions/actions counts for that rule set. Returns INTEROP_NOT_AVAILABLE if Ensemble is not installed."
+    )]
+    async fn iris_business_rule_info(
+        &self,
+        Parameters(p): Parameters<AnyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let action = p
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let rule_name = p
+            .get("rule_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let namespace = p
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("USER")
+            .to_string();
+        let (sm_server, policy) = self.active_server_manager_policy();
+        let params_json = serde_json::json!({ "namespace": namespace });
+        if let Err(gate) = crate::policy::gate::dispatch_gate(
+            "iris_business_rule_info",
+            sm_server.as_deref().unwrap_or(""),
+            policy.as_ref(),
+            &params_json,
+        ) {
+            return ok_json(gate);
+        }
+        let result = interop::handle_iris_business_rule_info(
+            self.iris_arc().as_deref(),
+            &interop::BusinessRuleInfoParams {
+                action,
+                rule_name,
+                namespace,
+            },
+        )
+        .await;
+        self.record_call("iris_business_rule_info", result.is_ok());
+        result
+    }
+
+    #[tool(
+        description = "Diff the running Interoperability production config against the last source-controlled version. Returns in_sync:true with changes:[] when no drift, or a changes array of {item_name, item_type, status} where status is added/removed/modified. Returns NO_SCM if no source control is configured."
+    )]
+    async fn iris_production_diff(
+        &self,
+        Parameters(p): Parameters<AnyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let production = p
+            .get("production")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let namespace = p
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("USER")
+            .to_string();
+        let (sm_server, policy) = self.active_server_manager_policy();
+        let params_json = serde_json::json!({ "namespace": namespace });
+        if let Err(gate) = crate::policy::gate::dispatch_gate(
+            "iris_production_diff",
+            sm_server.as_deref().unwrap_or(""),
+            policy.as_ref(),
+            &params_json,
+        ) {
+            return ok_json(gate);
+        }
+        let result = interop::handle_iris_production_diff(
+            self.iris_arc().as_deref(),
+            &interop::ProductionDiffParams {
+                production,
+                namespace,
+            },
+        )
+        .await;
+        self.record_call("iris_production_diff", result.is_ok());
+        result
+    }
+
     // ─── 024-interop-depth: Ensemble credentials (US2) ───
 
     #[tool(
@@ -6828,6 +6979,9 @@ impl IrisTools {
         dispatch_any!("iris_credential_manage", iris_credential_manage);
         dispatch_any!("iris_lookup_manage", iris_lookup_manage);
         dispatch_any!("iris_lookup_transfer", iris_lookup_transfer);
+        dispatch_any!("iris_message_body", iris_message_body);
+        dispatch_any!("iris_business_rule_info", iris_business_rule_info);
+        dispatch_any!("iris_production_diff", iris_production_diff);
         dispatch!(
             "iris_generate",
             crate::tools::info::GenerateParams,

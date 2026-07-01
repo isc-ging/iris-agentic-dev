@@ -55,7 +55,8 @@ pub enum IrisDiscovery {
 }
 
 /// Inner probe using a pre-built HTTP client. Avoids creating a new client per probe (Bug 24).
-async fn probe_atelier_with_client(
+/// `pub` so live integration tests can exercise the shared-client path directly.
+pub async fn probe_atelier_with_client(
     client: &reqwest::Client,
     host: &str,
     port: u16,
@@ -271,7 +272,8 @@ pub async fn discover_iris(explicit: Option<IrisConnection>) -> IrisDiscovery {
 }
 
 /// Emit a mode-specific, actionable warning for a found-but-unhealthy container.
-fn emit_unhealthy_message(container_name: &str, mode: FailureMode) {
+/// `pub` so live Docker integration tests can exercise every `FailureMode` variant directly.
+pub fn emit_unhealthy_message(container_name: &str, mode: FailureMode) {
     match mode {
         FailureMode::PortNotMapped => {
             tracing::warn!(
@@ -349,7 +351,8 @@ pub fn score_container_name(container_name: &str, workspace_basename: &str) -> u
 /// Used when IRIS_CONTAINER env var is set (e.g. from .iris-dev.toml).
 /// Resolve a specific named container to its web port and probe it.
 /// Returns a structured `DiscoveryResult` — never emits log messages itself.
-async fn discover_via_docker_named(target: &str) -> DiscoveryResult {
+/// `pub` so live Docker integration tests can probe real containers directly.
+pub async fn discover_via_docker_named(target: &str) -> DiscoveryResult {
     use bollard::container::ListContainersOptions;
     use bollard::Docker;
 
@@ -501,7 +504,8 @@ async fn probe_atelier_for_container(
     DiscoveryResult::Connected(conn)
 }
 
-async fn discover_via_docker() -> Option<IrisConnection> {
+/// `pub` so live Docker integration tests can exercise the full unnamed scan directly.
+pub async fn discover_via_docker() -> Option<IrisConnection> {
     use bollard::container::ListContainersOptions;
     use bollard::Docker;
 

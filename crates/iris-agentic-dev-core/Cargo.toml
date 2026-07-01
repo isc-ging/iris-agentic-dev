@@ -301,8 +301,21 @@ path = "tests/integration/test_iris_admin_observability_live.rs"
 required-features = ["testing"]
 
 [[test]]
+name = "test_interop_depth_unit"
+path = "tests/unit/test_interop_depth_unit.rs"
+
+[[test]]
+name = "test_interop_depth_live"
+path = "tests/integration/test_interop_depth_live.rs"
+required-features = ["testing"]
+
+[[test]]
 name = "test_sm_e2e"
 path = "tests/integration/test_sm_e2e.rs"
+
+[[test]]
+name = "test_discovery_docker_live"
+path = "tests/integration/test_discovery_docker_live.rs"
 
 [[test]]
 name = "test_tools_mod_unit"

@@ -2,7 +2,7 @@
 // No Docker, no network required.
 
 use iris_agentic_dev_core::iris::discovery::{
-    score_container_name, DiscoveryResult, FailureMode, IrisDiscovery,
+    emit_unhealthy_message, score_container_name, DiscoveryResult, FailureMode, IrisDiscovery,
 };
 
 // ── IrisDiscovery enum smoke test ─────────────────────────────────────────────
@@ -841,4 +841,76 @@ fn test_scheme_prefix_bypass_https_with_prefix() {
     let prefix: Option<String> = Some("iris".to_string());
     let should_bypass = scheme != "http" || prefix.is_some();
     assert!(should_bypass);
+}
+
+// ── emit_unhealthy_message — pure logging function, no I/O. Must never panic ──
+// for any FailureMode variant, including AtelierAuth401 which intentionally emits
+// nothing (the 401 WARN was already logged by the caller with the container name).
+
+#[test]
+fn test_emit_unhealthy_message_port_not_mapped_does_not_panic() {
+    emit_unhealthy_message("some-container", FailureMode::PortNotMapped);
+}
+
+#[test]
+fn test_emit_unhealthy_message_atelier_not_responding_does_not_panic() {
+    emit_unhealthy_message(
+        "some-container",
+        FailureMode::AtelierNotResponding { port: 52773 },
+    );
+}
+
+#[test]
+fn test_emit_unhealthy_message_atelier_http_error_does_not_panic() {
+    emit_unhealthy_message(
+        "some-container",
+        FailureMode::AtelierHttpError {
+            port: 52773,
+            status: 503,
+        },
+    );
+}
+
+#[test]
+fn test_emit_unhealthy_message_auth_401_does_not_panic() {
+    emit_unhealthy_message(
+        "some-container",
+        FailureMode::AtelierAuth401 { port: 52773 },
+    );
+}
+
+#[test]
+fn test_emit_unhealthy_message_empty_container_name_does_not_panic() {
+    emit_unhealthy_message("", FailureMode::PortNotMapped);
+}
+
+// ── score_container_name — additional edge cases not yet covered above ──────
+
+#[test]
+fn test_score_container_name_with_numeric_workspace() {
+    // Workspace basenames can be purely numeric (e.g. a directory named "042").
+    let score = score_container_name("042-iris", "042");
+    assert_eq!(score, 90, "starts_with(80) + iris suffix(10) = 90");
+}
+
+#[test]
+fn test_score_container_name_unicode_is_not_special_cased() {
+    // Non-ASCII container/workspace names should not panic and should follow
+    // the same case-folding + hyphen/underscore normalization rules.
+    let score = score_container_name("café-iris", "café");
+    assert_eq!(score, 90);
+}
+
+#[test]
+fn test_score_container_name_workspace_equals_iris_literal() {
+    // Workspace basename literally "iris" — container "iris-iris" starts_with "iris"
+    // and ends_with "-iris" simultaneously.
+    let score = score_container_name("iris-iris", "iris");
+    assert_eq!(score, 90, "starts_with(80) + iris suffix(10) = 90");
+}
+
+#[test]
+fn test_score_container_name_mixed_hyphen_and_underscore_in_same_name() {
+    let score = score_container_name("my-app_test", "my_app");
+    assert_eq!(score, 85, "starts_with(80) + test suffix(5) = 85");
 }

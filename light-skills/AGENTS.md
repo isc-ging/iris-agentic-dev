@@ -177,6 +177,31 @@ iris_admin(action="delete_webapp", name="/myapp")
 - `"redact"` — returns rows with `username`, `client_node_name`, `client_ip` replaced by `"[REDACTED]"`
 - `"allow"` — returns full data; `journal_search` requires this value; set in connection policy
 
+### Interoperability depth tools (056-interop-depth) — Merged tier, Query category
+
+```
+# Read a message body by ID — handles plain-text and stream-backed bodies
+iris_message_body(message_id="12345", dataPolicy="allow", acknowledgePhi=true)
+iris_message_body(message_id="12345", dataPolicy="redact")   # HL7 PID/MSH fields scrubbed
+iris_message_body(message_id="12345", max_bytes=1048576)     # clamped to 1MB max
+
+# List or inspect Ensemble business rules (Ens.Rule.RuleSet)
+iris_business_rule_info(action="list")
+iris_business_rule_info(action="get", rule_name="MyApp.RoutingRule")
+
+# Diff the running production against the last source-controlled version
+iris_production_diff()                              # uses the currently running production
+iris_production_diff(production="MyApp.Production")
+```
+
+**`dataPolicy` for `iris_message_body`** (message bodies may contain PHI):
+
+- `"block"` (default) — returns `PHI_POLICY_BLOCKED` immediately, regardless of content
+- `"allow"` — returns full body; requires `acknowledgePhi=true` or returns `PHI_ACK_REQUIRED`
+- `"redact"` — HL7 v2 PID-3/5/7/8/11/18 and MSH-3 fields replaced with `"[REDACTED]"`
+
+`iris_business_rule_info` and `iris_production_diff` are not PHI-gated (rule/config metadata only).
+
 ### Reading class source from IRIS (INT / system classes)
 
 To read the source of any class — including system classes like `%ASQ.Engine` that have no `.cls` on disk:
@@ -446,6 +471,17 @@ Error codes returned in the `error_code` field of tool responses. All follow `SC
 | `MISSING_PARAMS` | Required parameter absent — e.g. `journal_search` with neither `global_pattern` nor `time_range` | — |
 | `NAMESPACE_NOT_FOUND` | Requested namespace does not exist on this IRIS instance | `namespace` |
 | `DATABASE_NOT_FOUND` | Requested database name not found | `name` |
+| `MESSAGE_NOT_FOUND` | `iris_message_body` — no body record for the given `message_id` | `message_id` |
+| `PHI_ACK_REQUIRED` | `iris_message_body` with `dataPolicy=allow` and no `acknowledgePhi=true` | — |
+| `INVALID_MESSAGE_ID` | `iris_message_body` — `message_id` is not a valid integer | `message_id` |
+| `STREAM_READ_ERROR` | `iris_message_body` — stream-backed body could not be read | — |
+| `UNSUPPORTED_BODY_CLASS` | `iris_message_body` — body class is not a recognized stream/text type | `body_class` |
+| `RULE_NOT_FOUND` | `iris_business_rule_info action=get` — no rule set with the given `rule_name` | `rule_name` |
+| `INTEROP_NOT_AVAILABLE` | Ensemble/Interoperability is not installed in this namespace | — |
+| `NO_SCM` | `iris_production_diff` — no source control configured for this production | — |
+| `NO_SCM_VERSION` | `iris_production_diff` — SCM configured but no committed version yet | — |
+| `PRODUCTION_NOT_FOUND` | `iris_production_diff` — named production does not exist | `production` |
+| `NO_PRODUCTION` | `iris_production_diff` — no production currently running and none named | — |
 
 **PHI gate bypass** — for `PHI_GATE_BLOCKED`, add `"acknowledgePhi": true` to the tool call params. This only works for per-global name checks; `DATA_POLICY_BLOCKED` (bulk-PHI tools like `journal_search`) cannot be bypassed with `acknowledgePhi`.
 
