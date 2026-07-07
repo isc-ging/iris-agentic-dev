@@ -132,6 +132,29 @@ impl IrisConnection {
         }
     }
 
+    /// Return a clone of this connection authenticating as the restricted service account
+    /// configured via `IRIS_SERVICE_USERNAME` / `IRIS_SERVICE_PASSWORD`, or `None` when no
+    /// such account is set.
+    ///
+    /// Used to route privileged arbitrary-execution tools (`iris_execute`, `iris_query`
+    /// mode="write", `iris_global` set/kill) through a least-privilege IRIS identity that lacks
+    /// code-editing rights (no `%Development`), so those tools cannot edit class/routine code
+    /// even via ObjectScript indirection — while SCM / audit-sensitive tools keep running under
+    /// the primary (user) identity so checkouts and audit stay attributed to the real user.
+    ///
+    /// Enforcement lives in IRIS privileges (the service role), not in a string filter: a bare
+    /// `IRIS_SERVICE_USERNAME` with insufficient rights is what closes the bypass.
+    pub fn with_service_account(&self) -> Option<IrisConnection> {
+        let username = std::env::var("IRIS_SERVICE_USERNAME")
+            .ok()
+            .filter(|s| !s.is_empty())?;
+        let password = std::env::var("IRIS_SERVICE_PASSWORD").unwrap_or_default();
+        let mut c = self.clone();
+        c.username = username;
+        c.password = password;
+        Some(c)
+    }
+
     /// Build the full Atelier REST URL for a given path suffix.
     pub fn atelier_url(&self, path: &str) -> String {
         format!(
@@ -253,11 +276,23 @@ impl IrisConnection {
                 Ok(output) => return Ok(output),
                 Err(e) => {
                     let msg = e.to_string();
-                    // Only retry on network errors or 5xx; 4xx are client errors, don't retry.
+                    let msg_lower = msg.to_ascii_lowercase();
+                    // Only retry on transient network errors or 5xx; 4xx are client errors
+                    // (e.g. 401 auth) and must NOT be retried. The extra patterns cover cold-start
+                    // failures on the first call: DNS not warm, TLS handshake, connection reset,
+                    // or a half-open pooled connection surfacing as EOF / broken pipe.
                     let is_retryable = msg.contains("HTTP 5")
-                        || msg.contains("error sending request")
-                        || msg.contains("connection refused")
-                        || msg.contains("timed out");
+                        || msg_lower.contains("error sending request")
+                        || msg_lower.contains("connection refused")
+                        || msg_lower.contains("connection reset")
+                        || msg_lower.contains("connection closed")
+                        || msg_lower.contains("broken pipe")
+                        || msg_lower.contains("unexpected end of file")
+                        || msg_lower.contains("eof")
+                        || msg_lower.contains("dns")
+                        || msg_lower.contains("handshake")
+                        || msg_lower.contains("timed out")
+                        || msg_lower.contains("timeout");
                     if !is_retryable || attempt == delays.len() - 1 {
                         return Err(e);
                     }
@@ -708,6 +743,82 @@ mod system_mode_tests {
             debug_str.contains("IrisConnection"),
             "should be an IrisConnection: {debug_str}"
         );
+    }
+
+    #[test]
+    fn service_account_none_when_env_unset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved_u = std::env::var("IRIS_SERVICE_USERNAME").ok();
+        let saved_p = std::env::var("IRIS_SERVICE_PASSWORD").ok();
+        unsafe {
+            std::env::remove_var("IRIS_SERVICE_USERNAME");
+            std::env::remove_var("IRIS_SERVICE_PASSWORD");
+        }
+        let c = conn("USER", SystemMode::Unknown);
+        assert!(
+            c.with_service_account().is_none(),
+            "no service account configured → None (falls back to primary identity)"
+        );
+        unsafe {
+            if let Some(v) = saved_u {
+                std::env::set_var("IRIS_SERVICE_USERNAME", v);
+            }
+            if let Some(v) = saved_p {
+                std::env::set_var("IRIS_SERVICE_PASSWORD", v);
+            }
+        }
+    }
+
+    #[test]
+    fn service_account_overrides_credentials_only() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved_u = std::env::var("IRIS_SERVICE_USERNAME").ok();
+        let saved_p = std::env::var("IRIS_SERVICE_PASSWORD").ok();
+        unsafe {
+            std::env::set_var("IRIS_SERVICE_USERNAME", "dtetu_mcp");
+            std::env::set_var("IRIS_SERVICE_PASSWORD", "password");
+        }
+        let c = conn("USER", SystemMode::Development);
+        let svc = c.with_service_account().expect("service account configured");
+        // Credentials swapped to the service account…
+        assert_eq!(svc.username, "dtetu_mcp");
+        assert_eq!(svc.password, "password");
+        // …but every other connection property is preserved (same instance, namespace, mode).
+        assert_eq!(svc.base_url, c.base_url);
+        assert_eq!(svc.namespace, c.namespace);
+        assert_eq!(svc.system_mode, c.system_mode);
+        // Original connection is untouched.
+        assert_eq!(c.username, "_SYSTEM");
+        unsafe {
+            std::env::remove_var("IRIS_SERVICE_USERNAME");
+            std::env::remove_var("IRIS_SERVICE_PASSWORD");
+            if let Some(v) = saved_u {
+                std::env::set_var("IRIS_SERVICE_USERNAME", v);
+            }
+            if let Some(v) = saved_p {
+                std::env::set_var("IRIS_SERVICE_PASSWORD", v);
+            }
+        }
+    }
+
+    #[test]
+    fn service_account_ignored_when_username_empty() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved_u = std::env::var("IRIS_SERVICE_USERNAME").ok();
+        unsafe {
+            std::env::set_var("IRIS_SERVICE_USERNAME", "");
+        }
+        let c = conn("USER", SystemMode::Unknown);
+        assert!(
+            c.with_service_account().is_none(),
+            "empty username must be treated as unset"
+        );
+        unsafe {
+            std::env::remove_var("IRIS_SERVICE_USERNAME");
+            if let Some(v) = saved_u {
+                std::env::set_var("IRIS_SERVICE_USERNAME", v);
+            }
+        }
     }
 
     #[test]

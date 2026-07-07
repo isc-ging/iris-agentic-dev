@@ -12251,7 +12251,9 @@ async fn mount_generator_mocks_any_ns(server: &wiremock::MockServer, run_output:
 async fn test_scm_status_uncontrolled_via_wiremock() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    mount_scm_mocks(&server, "UNCONTROLLED\n").await;
+    // SCMSTATUS|isErr|isInSC|editable|hasCheckOut|hasUndoCheckout|hasAddToSC|owner
+    // Not in SC, menu offers AddToSourceControl → uncontrolled.
+    mount_scm_mocks(&server, "SCMSTATUS|0|0|0|0|0|1|\n").await;
 
     let _docker_guard = DOCKER_REQUIRED_LOCK
         .lock()
@@ -12290,8 +12292,8 @@ async fn test_scm_status_uncontrolled_via_wiremock() {
 async fn test_scm_status_controlled_editable_via_wiremock() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    // parse_action_msg("1|alice") → (1, "alice"): editable=true, owner=alice
-    mount_scm_mocks(&server, "1|alice\n").await;
+    // In SC, UndoCheckout enabled → checked out by current user, editable.
+    mount_scm_mocks(&server, "SCMSTATUS|0|1|1|0|1|0|alice\n").await;
 
     let _docker_guard = DOCKER_REQUIRED_LOCK
         .lock()
@@ -12340,8 +12342,8 @@ async fn test_scm_status_controlled_editable_via_wiremock() {
 async fn test_scm_status_controlled_locked_via_wiremock() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    // parse_action_msg("0|bob") → (0, "bob"): editable=false (locked), owner=bob
-    mount_scm_mocks(&server, "0|bob\n").await;
+    // In SC, neither CheckOut nor UndoCheckout available → locked by another user (bob).
+    mount_scm_mocks(&server, "SCMSTATUS|0|1|0|0|0|0|bob\n").await;
 
     let _docker_guard = DOCKER_REQUIRED_LOCK
         .lock()
@@ -12375,6 +12377,17 @@ async fn test_scm_status_controlled_locked_via_wiremock() {
         "should not be editable: {v}"
     );
     assert_eq!(v["locked"].as_bool(), Some(true), "should be locked: {v}");
+    // The whole point of the fix: surface the other user's ownership instead of null.
+    assert_eq!(
+        v["owner"].as_str(),
+        Some("bob"),
+        "must surface the locking user: {v}"
+    );
+    assert_eq!(
+        v["checked_out_by_me"].as_bool(),
+        Some(false),
+        "must not claim we hold the checkout: {v}"
+    );
 }
 
 /// scm menu → returns a list of enabled actions (lines 157-178).

@@ -434,7 +434,20 @@ async fn handle_delete(
                 .send()
                 .await
             {
-                Ok(r) if r.status().is_success() => deleted.push(name.clone()),
+                Ok(r) if r.status().is_success() => {
+                    // HTTP 200 doesn't mean the delete happened — a locked / checked-out doc
+                    // (ERROR #5845) still returns 200 with the failure in status.errors. Treat a
+                    // non-empty status.errors as a failure so a locked doc lands in `errors`, not
+                    // `deleted` (same false-positive fix as the single-delete path).
+                    let body: serde_json::Value = r.json().await.unwrap_or_default();
+                    match body["status"]["errors"].as_array() {
+                        Some(errs) if !errs.is_empty() => {
+                            let msg = errs[0]["error"].as_str().unwrap_or("delete failed");
+                            errors.push(serde_json::json!({"name": name, "error": msg}));
+                        }
+                        _ => deleted.push(name.clone()),
+                    }
+                }
                 Ok(r) => errors.push(
                     serde_json::json!({"name": name, "error": format!("HTTP {}", r.status())}),
                 ),
@@ -462,6 +475,17 @@ async fn handle_delete(
     if !del_status.is_success() {
         let body_hint = resp.text().await.unwrap_or_default();
         return http_err_json(del_status, body_hint.trim());
+    }
+    // Atelier returns HTTP 200 even when the delete failed server-side (e.g. the doc is locked /
+    // checked out → ERROR #5845): the real failure is in the JSON body's status.errors, not the
+    // HTTP status. Without this check we'd report success:true for a delete that never happened —
+    // a dangerous false positive for any caller that trusts it (mirrors the put path above).
+    let del_body: serde_json::Value = resp.json().await.unwrap_or_default();
+    if let Some(errs) = del_body["status"]["errors"].as_array() {
+        if !errs.is_empty() {
+            let msg = errs[0]["error"].as_str().unwrap_or("Document delete failed");
+            return err_json("DELETE_FAILED", msg);
+        }
     }
     ok_json(serde_json::json!({"success": true, "name": name}))
 }
