@@ -15,7 +15,9 @@ pub struct SearchParams {
     pub case_sensitive: bool,
     /// Filter to document category: CLS, MAC, INT, INC, or ALL (default)
     pub category: Option<String>,
-    /// Wildcard document scopes e.g. ["HS.FHIR.*.cls"]
+    /// REQUIRED wildcard document scope, e.g. ["Region.**.*.cls"] or ["HS.FHIR.*.cls"].
+    /// Atelier search is a sequential grep — an empty scope greps the whole namespace
+    /// and times out server-side, so at least one scope must be provided.
     #[serde(default)]
     pub documents: Vec<String>,
     #[serde(default = "default_namespace")]
@@ -37,23 +39,18 @@ fn ok_json(v: serde_json::Value) -> Result<rmcp::model::CallToolResult, rmcp::Er
 
 /// Resolve the Atelier `files` scope for a search.
 ///
-/// Atelier `/action/search` searches **nothing** unless a `files` wildcard list
-/// is supplied — omitting it returns an empty `result`, which is why unscoped
-/// searches silently returned zero hits. When the caller supplies `documents`
-/// we honour them verbatim (comma-joined); otherwise we synthesize a namespace-
-/// wide wildcard from the category so a bare `{query}` search still works.
-fn resolve_files(documents: &[String], category: &str) -> String {
-    if !documents.is_empty() {
-        return documents.join(",");
+/// Atelier `/action/search` is a sequential grep, not an index: it searches only
+/// the documents matched by the `files` wildcard list. A caller who supplies
+/// `documents` gets exactly that scope (comma-joined). A caller who supplies none
+/// is asking to grep the *entire* namespace — measured at 38s for a bare `*.cls`
+/// and a hard 504 for `*.cls,*.mac,*.int,*.inc` on a HealthShare-sized namespace.
+/// That can't be salvaged client-side (the server itself times out), so we return
+/// `None` here and surface an explicit error rather than a misleading empty result.
+fn resolve_files(documents: &[String]) -> Option<String> {
+    if documents.is_empty() {
+        return None;
     }
-    match category.to_ascii_uppercase().as_str() {
-        "CLS" => "*.cls".to_string(),
-        "MAC" => "*.mac".to_string(),
-        "INT" => "*.int".to_string(),
-        "INC" => "*.inc".to_string(),
-        // ALL (or anything unexpected) → every source category.
-        _ => "*.cls,*.mac,*.int,*.inc".to_string(),
-    }
+    Some(documents.join(","))
 }
 
 pub async fn handle_iris_search(
@@ -63,7 +60,23 @@ pub async fn handle_iris_search(
     log_store: Arc<Mutex<log_store::LogStore>>,
 ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
     let category = p.category.as_deref().unwrap_or("ALL");
-    let files = resolve_files(&p.documents, category);
+    // A scope is mandatory. Without one Atelier would grep the whole namespace and
+    // time out server-side, returning nothing — an empty result that reads as
+    // "term not found" when the term is simply out of a (nonexistent) scope.
+    let files = match resolve_files(&p.documents) {
+        Some(f) => f,
+        None => {
+            return ok_json(serde_json::json!({
+                "success": false,
+                "error_code": "SCOPE_REQUIRED",
+                "error": "iris_search requires a document scope. Namespace-wide search \
+                          greps every document sequentially and times out server-side. \
+                          Pass `documents` with a wildcard scope, e.g. [\"Region.**.*.cls\"] \
+                          or [\"MyPkg.*.cls\"].",
+                "query": p.query,
+            }));
+        }
+    };
     // Atelier `/action/search` treats a *missing* `case` param as case-SENSITIVE,
     // so omitting it (the old behaviour when `case_sensitive=false`) silently made
     // every default search exact-case — `hiddenset` or even `HiddenSet` would miss
@@ -483,31 +496,27 @@ mod tests {
         assert_eq!(v["results"][0]["content"], "bar");
     }
 
-    // ── resolve_files: Atelier requires a `files` scope or it searches nothing ─
+    // ── resolve_files: a scope is mandatory (namespace-wide grep times out) ────
     #[test]
     fn test_resolve_files_honours_explicit_documents() {
         let docs = vec!["Region.**.*.cls".to_string(), "Foo.*.mac".to_string()];
-        assert_eq!(resolve_files(&docs, "ALL"), "Region.**.*.cls,Foo.*.mac");
+        assert_eq!(
+            resolve_files(&docs).as_deref(),
+            Some("Region.**.*.cls,Foo.*.mac")
+        );
     }
 
     #[test]
-    fn test_resolve_files_defaults_per_category() {
-        assert_eq!(resolve_files(&[], "CLS"), "*.cls");
-        assert_eq!(resolve_files(&[], "MAC"), "*.mac");
-        assert_eq!(resolve_files(&[], "INT"), "*.int");
-        assert_eq!(resolve_files(&[], "INC"), "*.inc");
+    fn test_resolve_files_single_document() {
+        let docs = vec!["MyPkg.*.cls".to_string()];
+        assert_eq!(resolve_files(&docs).as_deref(), Some("MyPkg.*.cls"));
     }
 
     #[test]
-    fn test_resolve_files_all_category_covers_every_type() {
-        assert_eq!(resolve_files(&[], "ALL"), "*.cls,*.mac,*.int,*.inc");
-        // Unknown category is treated as ALL rather than searching nothing.
-        assert_eq!(resolve_files(&[], "WHATEVER"), "*.cls,*.mac,*.int,*.inc");
-    }
-
-    #[test]
-    fn test_resolve_files_category_case_insensitive() {
-        assert_eq!(resolve_files(&[], "cls"), "*.cls");
+    fn test_resolve_files_empty_scope_is_rejected() {
+        // No scope → None, so the handler returns SCOPE_REQUIRED instead of
+        // greping the whole namespace and timing out.
+        assert_eq!(resolve_files(&[]), None);
     }
 
     #[test]
