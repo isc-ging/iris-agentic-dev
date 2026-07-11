@@ -365,20 +365,26 @@ impl IrisConnection {
     }
 
     /// Build the `.cls` source lines for the temp executor class.
+    ///
+    /// Uses a plain ClassMethod (not CodeMode=objectgenerator) so that user code is
+    /// compiled directly through the IRIS macro preprocessor. This means $$$macros and
+    /// #include / #define directives in user code work as expected, matching what a real
+    /// .cls compilation provides.
     fn build_exec_class(class_name: &str, code: &str) -> Vec<String> {
         let mut lines: Vec<String> = vec![
+            "Include %occInclude".into(),
+            "".into(),
             format!("Class {} [ Final ]", class_name),
             "{".into(),
             "".into(),
-            "ClassMethod Execute() As %String [ CodeMode = objectgenerator, SqlProc ]".into(),
+            "ClassMethod Execute() As %String [ SqlProc ]".into(),
             "{".into(),
-            // Generator body runs at compile time on the IRIS server.
-            // #56: use %Library.File.TempFilename() for a platform-portable temp path
-            // (Unix /tmp/... and Windows C:\Windows\Temp\...) instead of hardcoded /tmp.
+            // Capture all output to a temp file so we can return it as a string via SQL.
+            // #56: use %Library.File.TempFilename() for platform-portable temp path.
             "  Set tmpfile = ##class(%Library.File).TempFilename(\"txt\")".into(),
             "  Set savedIO = $IO".into(),
             "  Open tmpfile:(\"WNS\"):5".into(),
-            "  If '$TEST { Do %code.WriteLine(\" Quit \"\"ERROR: output capture unavailable\"\"\") Quit }".into(),
+            "  If '$TEST { Quit \"ERROR: output capture unavailable\" }".into(),
             "  Use tmpfile".into(),
             "  Try {".into(),
         ];
@@ -386,18 +392,16 @@ impl IrisConnection {
             lines.push(format!("    {}", line));
         }
         lines.extend([
-            "    Write !".into(), // IDEV-3: sentinel ensures temp file always ends with \n
+            "    Write !".into(), // sentinel ensures output always ends with \n (IDEV-3)
             "  } Catch ex {".into(),
             "    Write \"ERROR: \",ex.DisplayString(),!".into(),
             "  }".into(),
             // Surface non-exception errors (e.g. OPEN failure sets $ZERROR but doesn't throw).
-            // Only emit if nothing was written yet (out sentinel means empty output).
             "  If ($ZError'=\"\") && ($ZError'=\",\") { Write \"ERROR($ZERROR): \",$ZError,! }"
                 .into(),
             "  Close tmpfile".into(),
             "  Use savedIO".into(),
-            // Read the temp file contents using %File for reliability.
-            // Read line:0 (timeout 0) fails on some IRIS versions — %File.ReadLine is portable.
+            // Read captured output from temp file and return it.
             "  Set out = \"\"".into(),
             "  Set stream = ##class(%Stream.FileCharacter).%New()".into(),
             "  Set sc = stream.LinkToFile(tmpfile)".into(),
@@ -405,9 +409,7 @@ impl IrisConnection {
             "    While 'stream.AtEnd { Set out = out _ stream.ReadLine() _ $Char(10) }".into(),
             "  }".into(),
             "  Do ##class(%Library.File).Delete(tmpfile)".into(),
-            "  Set qout = $Replace($Replace(out,$Char(34),$Char(34)_$Char(34)),$Char(10),$Char(1))"
-                .into(),
-            "  Do %code.WriteLine(\" Quit \"_$Char(34)_qout_$Char(34))".into(),
+            "  Quit out".into(),
             "}".into(),
             "".into(),
             "}".into(),
@@ -898,6 +900,29 @@ mod pure_fn_tests {
         let lines = IrisConnection::build_exec_class_for_test("T", "/tmp/t.txt", "Write 1");
         let has_sentinel = lines.iter().any(|l| l.trim() == "Write !");
         assert!(has_sentinel, "sentinel Write ! must be present");
+    }
+
+    #[test]
+    fn build_exec_class_has_include_occinclude() {
+        let lines = IrisConnection::build_exec_class_for_test("T", "/tmp/t.txt", "Write 1");
+        assert!(
+            lines.iter().any(|l| l.trim() == "Include %occInclude"),
+            "Include %occInclude must be present so $$$macros resolve in user code"
+        );
+    }
+
+    #[test]
+    fn build_exec_class_is_plain_classmethod_not_generator() {
+        let lines = IrisConnection::build_exec_class_for_test("T", "/tmp/t.txt", "Write 1");
+        let joined = lines.join("\n");
+        assert!(
+            !joined.contains("CodeMode = objectgenerator"),
+            "user code method must be plain ClassMethod, not objectgenerator"
+        );
+        assert!(
+            joined.contains("SqlProc"),
+            "method must still be SqlProc so it can be called via SQL"
+        );
     }
 }
 
