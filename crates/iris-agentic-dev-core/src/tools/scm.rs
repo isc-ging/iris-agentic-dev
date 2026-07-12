@@ -678,6 +678,16 @@ mod tests {
     fn test_os_quote_empty() {
         assert_eq!(os_quote(""), "");
     }
+    #[test]
+    fn test_os_quote_mixed_quote_and_newline() {
+        // String with both double-quote and newline
+        assert_eq!(os_quote("say \"hi\"\nbye"), "say \"\"hi\"\"$Char(10)bye");
+    }
+    #[test]
+    fn test_os_quote_cr_and_newline() {
+        // String with carriage return AND newline
+        assert_eq!(os_quote("line\r\nend"), "line$Char(13)$Char(10)end");
+    }
 
     // ── parse_action_msg ─────────────────────────────────────────────────────
     #[test]
@@ -829,6 +839,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_status_check_code_contains_username() {
+        let code = status_check_code("Doc.cls", "myuser", "pass");
+        assert!(code.contains("myuser"), "must contain the username: {code}");
+    }
+
+    #[test]
+    fn test_status_check_code_contains_document_name() {
+        let code = status_check_code("MyClass.cls", "user", "pass");
+        assert!(
+            code.contains("MyClass.cls"),
+            "must contain the document name: {code}"
+        );
+    }
+
+    #[test]
+    fn test_status_check_code_contains_scmstatus_sentinel() {
+        let code = status_check_code("Doc.cls", "user", "pass");
+        assert!(
+            code.contains("SCMSTATUS"),
+            "must contain SCMSTATUS sentinel: {code}"
+        );
+    }
+
     // ── parse_scm_status_line ─────────────────────────────────────────────────
     #[test]
     fn test_parse_scm_status_line_full() {
@@ -853,6 +887,36 @@ mod tests {
     fn test_parse_scm_status_line_rejects_non_sentinel() {
         assert!(parse_scm_status_line("ERROR: something broke").is_none());
         assert!(parse_scm_status_line("").is_none());
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_with_owner() {
+        // Line with owner field populated
+        let (in_sc, co, undo, add, owner) =
+            parse_scm_status_line("SCMSTATUS|0|1|0|1|1|0|alice").unwrap();
+        assert!(in_sc);
+        assert!(co);
+        assert!(undo);
+        assert!(!add);
+        assert_eq!(owner, "alice");
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_malformed_missing_pipe() {
+        // Malformed line (missing pipe) should return None
+        assert!(parse_scm_status_line("SCMSTATUS0101010").is_none());
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_all_fields_zero() {
+        // Valid line with all boolean fields as 0
+        let (in_sc, co, undo, add, owner) =
+            parse_scm_status_line("SCMSTATUS|0|0|0|0|0|0|").unwrap();
+        assert!(!in_sc);
+        assert!(!co);
+        assert!(!undo);
+        assert!(!add);
+        assert_eq!(owner, "");
     }
 
     // ── parse_checked_out_by (native NOTICE fallback, bug #3) ─────────────────
@@ -886,6 +950,30 @@ mod tests {
     fn test_parse_checked_out_by_none_when_absent() {
         assert!(parse_checked_out_by("ERROR: <PROTECT>").is_none());
         assert!(parse_checked_out_by("").is_none());
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_standard_format_no_timestamp() {
+        // Standard format without timestamp
+        let raw = "checked out by user 'james'";
+        let (owner, ts) = parse_checked_out_by(raw).unwrap();
+        assert_eq!(owner, "james");
+        assert_eq!(ts, None);
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_empty_string() {
+        // Empty string should return None
+        assert!(parse_checked_out_by("").is_none());
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_unrelated_text() {
+        // Unrelated text without the pattern should return None
+        assert!(parse_checked_out_by("This document has some other information").is_none());
+        assert!(
+            parse_checked_out_by("checked out by admin but not in the expected format").is_none()
+        );
     }
 
     // ── derive_scm_status ─────────────────────────────────────────────────────

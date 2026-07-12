@@ -398,3 +398,11 @@ required-features = ["testing"]
 name = "test_trace_export_live"
 path = "tests/integration/test_trace_export_live.rs"
 required-features = ["testing"]
+
+[[test]]
+name = "test_skills_unit_gaps"
+path = "tests/unit/test_skills_unit_gaps.rs"
+
+[[test]]
+name = "test_dict_unit"
+path = "tests/unit/test_dict_unit.rs"

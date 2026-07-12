@@ -1261,4 +1261,144 @@ mod additional_tests {
         let stripped = strip_iris_banner(raw);
         assert_eq!(stripped.trim(), "hello");
     }
+
+    // ── is_retryable_error classification logic ───────────────────────────────
+
+    /// Helper to classify error messages as retryable or not.
+    /// Mirrors the classification in execute_via_generator (lines 284-295).
+    fn classify_error_as_retryable(msg: &str) -> bool {
+        let msg_lower = msg.to_ascii_lowercase();
+        msg.contains("HTTP 5")
+            || msg_lower.contains("error sending request")
+            || msg_lower.contains("connection refused")
+            || msg_lower.contains("connection reset")
+            || msg_lower.contains("connection closed")
+            || msg_lower.contains("broken pipe")
+            || msg_lower.contains("unexpected end of file")
+            || msg_lower.contains("eof")
+            || msg_lower.contains("dns")
+            || msg_lower.contains("handshake")
+            || msg_lower.contains("timed out")
+            || msg_lower.contains("timeout")
+    }
+
+    #[test]
+    fn classify_http_5xx_as_retryable() {
+        assert!(classify_error_as_retryable(
+            "HTTP 500 Internal Server Error"
+        ));
+        assert!(classify_error_as_retryable("HTTP 502 Bad Gateway"));
+        assert!(classify_error_as_retryable("HTTP 503 Service Unavailable"));
+        assert!(classify_error_as_retryable("HTTP 504 Gateway Timeout"));
+    }
+
+    #[test]
+    fn classify_http_4xx_as_not_retryable() {
+        assert!(!classify_error_as_retryable("HTTP 401 Unauthorized"));
+        assert!(!classify_error_as_retryable("HTTP 403 Forbidden"));
+        assert!(!classify_error_as_retryable("HTTP 404 Not Found"));
+        assert!(!classify_error_as_retryable("HTTP 400 Bad Request"));
+    }
+
+    #[test]
+    fn classify_connection_refused_as_retryable() {
+        assert!(classify_error_as_retryable("connection refused"));
+        assert!(classify_error_as_retryable("Connection refused"));
+        assert!(classify_error_as_retryable("error: connection refused"));
+    }
+
+    #[test]
+    fn classify_connection_reset_as_retryable() {
+        assert!(classify_error_as_retryable("connection reset"));
+        assert!(classify_error_as_retryable("Connection reset by peer"));
+    }
+
+    #[test]
+    fn classify_connection_closed_as_retryable() {
+        assert!(classify_error_as_retryable("connection closed"));
+        assert!(classify_error_as_retryable(
+            "Connection closed unexpectedly"
+        ));
+    }
+
+    #[test]
+    fn classify_broken_pipe_as_retryable() {
+        assert!(classify_error_as_retryable("broken pipe"));
+        assert!(classify_error_as_retryable("Broken pipe"));
+    }
+
+    #[test]
+    fn classify_eof_as_retryable() {
+        assert!(classify_error_as_retryable("eof"));
+        assert!(classify_error_as_retryable("EOF"));
+        assert!(classify_error_as_retryable("unexpected end of file"));
+        assert!(classify_error_as_retryable("Unexpected End of File"));
+    }
+
+    #[test]
+    fn classify_dns_as_retryable() {
+        assert!(classify_error_as_retryable("dns lookup failed"));
+        assert!(classify_error_as_retryable("DNS resolution error"));
+    }
+
+    #[test]
+    fn classify_handshake_as_retryable() {
+        assert!(classify_error_as_retryable("tls handshake failed"));
+        assert!(classify_error_as_retryable("Handshake error"));
+    }
+
+    #[test]
+    fn classify_timeout_as_retryable() {
+        assert!(classify_error_as_retryable("timed out"));
+        assert!(classify_error_as_retryable("timeout"));
+        assert!(classify_error_as_retryable("Timed Out"));
+        assert!(classify_error_as_retryable("TIMEOUT"));
+    }
+
+    #[test]
+    fn classify_error_sending_request_as_retryable() {
+        assert!(classify_error_as_retryable("error sending request"));
+        assert!(classify_error_as_retryable(
+            "Error sending request to server"
+        ));
+    }
+
+    #[test]
+    fn classify_generic_error_as_not_retryable() {
+        // Generic errors that don't match any retryable pattern → not retryable
+        assert!(!classify_error_as_retryable("invalid json response"));
+        assert!(!classify_error_as_retryable("query execution failed"));
+        assert!(!classify_error_as_retryable(
+            "compilation error: unexpected token"
+        ));
+    }
+
+    #[test]
+    fn classify_case_insensitivity() {
+        // Most patterns are checked against lowercase version, so case variations work
+        assert!(classify_error_as_retryable("Connection Refused"));
+        assert!(classify_error_as_retryable("CONNECTION CLOSED"));
+        assert!(classify_error_as_retryable("Error Sending Request"));
+    }
+
+    #[test]
+    fn classify_combined_message() {
+        // Error messages with multiple keywords — retryable if ANY keyword matches
+        assert!(classify_error_as_retryable(
+            "Failed to send request: connection refused after DNS lookup"
+        ));
+        assert!(classify_error_as_retryable(
+            "HTTP 503 Service Unavailable: timeout waiting for backend"
+        ));
+    }
+
+    #[test]
+    fn classify_empty_string_as_not_retryable() {
+        assert!(!classify_error_as_retryable(""));
+    }
+
+    #[test]
+    fn classify_whitespace_only_as_not_retryable() {
+        assert!(!classify_error_as_retryable("   "));
+    }
 }

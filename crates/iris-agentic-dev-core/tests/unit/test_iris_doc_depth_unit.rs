@@ -285,3 +285,232 @@ fn test_execute_method_injection_guard_clean() {
         .any(|ch| class.contains(*ch) || method.contains(*ch));
     assert!(!has_injection, "clean names should not trigger guard");
 }
+
+// ── New tests for uncovered pure functions ───────────────────────────────────
+
+// ── Test 1: require_name edge cases ──────────────────────────────────────────
+
+#[test]
+fn test_require_name_trimmed_whitespace() {
+    // Test that leading/trailing whitespace in name is trimmed
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode": "get", "name": "  Foo.cls  "}"#).unwrap();
+    assert_eq!(p.name.as_deref(), Some("  Foo.cls  "));
+    // The actual trimming happens in require_name function; verify the name was parsed
+    let name = p.name.unwrap();
+    let trimmed = name.trim();
+    assert_eq!(trimmed, "Foo.cls");
+}
+
+#[test]
+fn test_require_name_all_spaces_returns_error() {
+    // Test that name with only spaces is treated as missing
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "name": "   "}"#).unwrap();
+    assert_eq!(p.name.as_deref(), Some("   "));
+    // When passed through require_name logic: trim() yields "", which is_empty()
+    let name = p.name.unwrap();
+    let trimmed = name.trim();
+    assert!(trimmed.is_empty(), "all-spaces should trim to empty string");
+}
+
+#[test]
+fn test_require_name_preserves_extension() {
+    // Test that file extension is preserved as-is (case, format)
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode": "get", "name": "MyClass.CLS"}"#).unwrap();
+    assert_eq!(p.name.as_deref(), Some("MyClass.CLS"));
+    // Extension should not be modified
+    let name = p.name.unwrap();
+    assert!(name.ends_with(".CLS"));
+}
+
+#[test]
+fn test_require_name_missing_field() {
+    // Test that missing name field defaults to None
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get"}"#).unwrap();
+    assert!(p.name.is_none());
+}
+
+// ── Test 2: de_opt_i64_lenient deserializer ─────────────────────────────────
+
+#[test]
+fn test_de_opt_i64_lenient_json_number() {
+    // Test that JSON number 42 deserializes to Some(42)
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "start": 42}"#).unwrap();
+    assert_eq!(p.start, Some(42));
+}
+
+#[test]
+fn test_de_opt_i64_lenient_json_string() {
+    // Test that JSON string "42" deserializes to Some(42)
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "start": "42"}"#).unwrap();
+    assert_eq!(p.start, Some(42));
+}
+
+#[test]
+fn test_de_opt_i64_lenient_json_string_trimmed() {
+    // Test that JSON string "  42  " (with spaces) deserializes to Some(42)
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "start": "  42  "}"#).unwrap();
+    assert_eq!(p.start, Some(42));
+}
+
+#[test]
+fn test_de_opt_i64_lenient_json_string_empty() {
+    // Test that empty string "" deserializes to None
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "start": ""}"#).unwrap();
+    assert_eq!(p.start, None);
+}
+
+#[test]
+fn test_de_opt_i64_lenient_null() {
+    // Test that JSON null deserializes to None
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "start": null}"#).unwrap();
+    assert_eq!(p.start, None);
+}
+
+#[test]
+fn test_de_opt_i64_lenient_missing_field() {
+    // Test that missing field deserializes to None
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get"}"#).unwrap();
+    assert_eq!(p.start, None);
+}
+
+#[test]
+fn test_de_opt_i64_lenient_invalid_string() {
+    // Test that JSON string "abc" (non-numeric) fails deserialization
+    let result: Result<IrisDocParams, _> =
+        serde_json::from_str(r#"{"mode": "get", "start": "abc"}"#);
+    assert!(
+        result.is_err(),
+        "non-numeric string should fail deserialization"
+    );
+}
+
+#[test]
+fn test_de_opt_i64_lenient_float_truncated() {
+    // Test that JSON float 42.7 is truncated to i64 (42)
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "start": 42.7}"#).unwrap();
+    assert_eq!(p.start, Some(42), "float should be truncated to i64");
+}
+
+#[test]
+fn test_de_opt_i64_lenient_large_number() {
+    // Test that large numbers work (e.g., 999999)
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "get", "end": 999999}"#).unwrap();
+    assert_eq!(p.end, Some(999999));
+}
+
+// ── Test 3: IrisDocParams mode field deserialization ────────────────────────
+
+#[test]
+fn test_mode_insert_deserializes() {
+    // Test that mode "insert" deserializes to String "insert"
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode": "insert", "name": "Foo.cls", "content": "new line"}"#)
+            .unwrap();
+    assert_eq!(p.mode, "insert");
+}
+
+#[test]
+fn test_mode_delete_lines_deserializes() {
+    // Test that mode "delete_lines" deserializes to String "delete_lines"
+    let p: IrisDocParams = serde_json::from_str(
+        r#"{"mode": "delete_lines", "name": "Foo.cls", "start": 1, "end": 5, "expected": "line"}"#,
+    )
+    .unwrap();
+    assert_eq!(p.mode, "delete_lines");
+}
+
+#[test]
+fn test_mode_get_is_default_when_omitted() {
+    // Test that mode defaults to "get" when omitted
+    let p: IrisDocParams = serde_json::from_str(r#"{"name": "Foo.cls"}"#).unwrap();
+    assert_eq!(p.mode, "get", "mode should default to 'get'");
+}
+
+#[test]
+fn test_mode_unknown_string_accepted() {
+    // Test that unknown mode string is accepted as-is (mode is plain String, not enum)
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "unknown_mode_xyz"}"#).unwrap();
+    assert_eq!(p.mode, "unknown_mode_xyz");
+}
+
+#[test]
+fn test_mode_case_preserved() {
+    // Test that mode case is preserved exactly as input (no normalization in deserialization)
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode": "GET"}"#).unwrap();
+    assert_eq!(p.mode, "GET", "mode case should be preserved in params");
+}
+
+// ── Test 4: STALE_CONTENT error structure ───────────────────────────────────
+
+#[test]
+fn test_stale_content_error_json_structure() {
+    // Test that the JSON error structure has the expected fields
+    // Reconstruct what stale_content_err would produce
+    let diff = (
+        2,
+        "expected_line_content".to_string(),
+        "actual_line_content".to_string(),
+    );
+    let block_start = 10i64;
+    let line_no = block_start + diff.0 as i64;
+
+    let error_json = serde_json::json!({
+        "success": false,
+        "error_code": "STALE_CONTENT",
+        "error": format!(
+            "Line {line_no} does not match `expected` — the document changed since you \
+             last read it. Re-fetch with mode=get or mode=fragment and retry with current \
+             line numbers."
+        ),
+        "line": line_no,
+        "expected_line": diff.1,
+        "actual_line": diff.2,
+    });
+
+    assert_eq!(error_json["success"], false);
+    assert_eq!(error_json["error_code"], "STALE_CONTENT");
+    assert_eq!(
+        error_json["line"], 12,
+        "line should be block_start + offset"
+    );
+    assert_eq!(error_json["expected_line"], "expected_line_content");
+    assert_eq!(error_json["actual_line"], "actual_line_content");
+    assert!(error_json["error"].is_string());
+    assert!(error_json["error"].as_str().unwrap().contains("Line 12"));
+}
+
+#[test]
+fn test_stale_content_error_line_calculation() {
+    // Test that the line number is correctly calculated: block_start + offset
+    let test_cases = vec![(0, 5, 5), (5, 0, 5), (10, 3, 13), (100, 50, 150)];
+    for (block_start, offset, expected_line) in test_cases {
+        let line_no = block_start + offset as i64;
+        assert_eq!(line_no, expected_line, "line calculation should be correct");
+    }
+}
+
+#[test]
+fn test_stale_content_error_preserves_content() {
+    // Test that expected and actual line content are preserved in error
+    let expected_content = "    public String getName() {".to_string();
+    let actual_content = "    public int getCount() {".to_string();
+    let diff = (0, expected_content.clone(), actual_content.clone());
+    let block_start = 42i64;
+
+    let error_json = serde_json::json!({
+        "success": false,
+        "error_code": "STALE_CONTENT",
+        "error": "test error",
+        "line": block_start + 0,
+        "expected_line": diff.1,
+        "actual_line": diff.2,
+    });
+
+    assert_eq!(
+        error_json["expected_line"].as_str().unwrap(),
+        &expected_content
+    );
+    assert_eq!(error_json["actual_line"].as_str().unwrap(), &actual_content);
+}

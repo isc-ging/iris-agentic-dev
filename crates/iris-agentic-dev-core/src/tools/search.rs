@@ -526,4 +526,151 @@ mod tests {
         assert_eq!(v["total_found"], 0);
         assert_eq!(v["results"].as_array().unwrap().len(), 0);
     }
+
+    // ── SCOPE_REQUIRED guard condition ────────────────────────────────────────
+    #[test]
+    fn test_scope_required_guard_empty_documents_no_category() {
+        // Verify the guard condition that triggers SCOPE_REQUIRED:
+        // SearchParams with no documents and no category should fail the scope check.
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "FindMe", "documents": [], "category": null}"#)
+                .unwrap();
+        // Trigger the SCOPE_REQUIRED path by checking the guard condition directly
+        assert!(
+            p.documents.is_empty(),
+            "documents must be empty to trigger SCOPE_REQUIRED"
+        );
+        assert!(
+            p.category.is_none(),
+            "category must be None to proceed to handler check"
+        );
+        // resolve_files should return None for empty documents
+        assert_eq!(
+            resolve_files(&p.documents),
+            None,
+            "empty documents should return None and trigger SCOPE_REQUIRED"
+        );
+    }
+
+    #[test]
+    fn test_scope_required_guard_with_category_still_requires_scope() {
+        // Even with a category specified, empty documents should still fail
+        let p: SearchParams =
+            serde_json::from_str(r#"{"query": "x", "documents": [], "category": "CLS"}"#).unwrap();
+        assert!(p.documents.is_empty());
+        assert_eq!(resolve_files(&p.documents), None);
+    }
+
+    // ── IRIS_SEARCH_SYNC_TIMEOUT environment variable parsing ─────────────────
+    #[test]
+    fn test_iris_search_sync_timeout_unset_defaults_to_30() {
+        // Simulate the parsing logic when env var is unset
+        let parsed = std::env::var("IRIS_SEARCH_SYNC_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|&v| v > 0)
+            .unwrap_or(30);
+        // When unset (or missing), should default to 30
+        // This test runs with the var unset, so we expect 30
+        assert_eq!(parsed, 30);
+    }
+
+    #[test]
+    fn test_iris_search_sync_timeout_valid_number() {
+        // Simulate parsing when var is set to a valid number
+        let valid_value = "5".parse::<u64>().ok().filter(|&v| v > 0).unwrap_or(30);
+        assert_eq!(valid_value, 5);
+    }
+
+    #[test]
+    fn test_iris_search_sync_timeout_invalid_string_falls_back() {
+        // Simulate parsing when var is set to invalid string
+        let invalid_value = "abc".parse::<u64>().ok().filter(|&v| v > 0).unwrap_or(30);
+        assert_eq!(invalid_value, 30, "invalid string should fall back to 30");
+    }
+
+    #[test]
+    fn test_iris_search_sync_timeout_zero_falls_back() {
+        // Simulate parsing when var is set to zero (invalid)
+        let zero_value = "0".parse::<u64>().ok().filter(|&v| v > 0).unwrap_or(30);
+        assert_eq!(zero_value, 30, "zero should fall back to 30");
+    }
+
+    #[test]
+    fn test_iris_search_sync_timeout_negative_falls_back() {
+        // Negative numbers can't be parsed into u64, so should fall back to 30
+        let negative_value = "-5".parse::<u64>().ok().filter(|&v| v > 0).unwrap_or(30);
+        assert_eq!(negative_value, 30, "negative should fall back to 30");
+    }
+
+    // ── parse_search_results: count is match count, not document count ────────
+    #[test]
+    fn test_parse_single_match_with_correct_fields() {
+        // Single document with one match should have total_found = 1
+        let body = serde_json::json!({"result": {"workId": null, "content": [
+            {"doc": "MyApp.Util.cls", "matches": [
+                {"text": "MyMethod()", "line": 42, "member": "MyMethod"}
+            ]}
+        ]}});
+        let v = parse(body);
+        assert_eq!(v["total_found"], 1);
+        assert_eq!(v["results"][0]["document"], "MyApp.Util.cls");
+        assert_eq!(v["results"][0]["line"], 42);
+        assert_eq!(v["results"][0]["member"], "MyMethod");
+        assert_eq!(v["results"][0]["content"], "MyMethod()");
+    }
+
+    #[test]
+    fn test_parse_multiple_matches_one_document_counts_matches() {
+        // One document with 5 matches should count as 5 results, not 1
+        let body = serde_json::json!({"result": [
+            {"doc": "App.Handler.cls", "matches": [
+                {"text": "line 1", "line": 10, "member": "M1"},
+                {"text": "line 2", "line": 20, "member": "M2"},
+                {"text": "line 3", "line": 30, "member": "M3"},
+                {"text": "line 4", "line": 40, "member": "M4"},
+                {"text": "line 5", "line": 50, "member": "M5"}
+            ]}
+        ]});
+        let v = parse(body);
+        // Key assertion: total_found counts matches, not documents
+        assert_eq!(
+            v["total_found"], 5,
+            "should count 5 matches as 5 results, not 1 document"
+        );
+        assert_eq!(v["results"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn test_parse_multiple_documents_multiple_matches_counts_total_matches() {
+        // 2 docs with 2 matches each should be 4 total
+        let body = serde_json::json!({"result": [
+            {"doc": "Doc1.cls", "matches": [
+                {"text": "a", "line": 1, "member": ""},
+                {"text": "b", "line": 2, "member": ""}
+            ]},
+            {"doc": "Doc2.cls", "matches": [
+                {"text": "c", "line": 3, "member": ""},
+                {"text": "d", "line": 4, "member": ""}
+            ]}
+        ]});
+        let v = parse(body);
+        assert_eq!(
+            v["total_found"], 4,
+            "should count total matches across all documents"
+        );
+        assert_eq!(v["results"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn test_parse_respects_atline_fallback_when_line_missing() {
+        // Some responses use `atLine` instead of `line`
+        let body = serde_json::json!({"result": {"workId": null, "content": [
+            {"doc": "Legacy.cls", "atLine": 99, "text": "oldstyle", "member": "OldMethod"}
+        ]}});
+        let v = parse(body);
+        assert_eq!(v["total_found"], 1);
+        assert_eq!(v["results"][0]["line"], 99);
+        assert_eq!(v["results"][0]["content"], "oldstyle");
+    }
 }

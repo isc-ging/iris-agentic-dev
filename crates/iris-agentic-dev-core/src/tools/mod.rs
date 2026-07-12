@@ -46,6 +46,7 @@ impl std::ops::Deref for AnyParams {
 pub mod admin;
 pub mod dict;
 pub mod doc;
+pub mod gate_macro;
 pub mod global;
 pub mod info;
 pub mod interop;
@@ -58,6 +59,7 @@ pub mod symbols_local;
 
 pub use doc::{DocMode, IrisDocParams};
 pub use scm::{ScmAction, ScmParams};
+// tool_gate is a macro_export, no need to re-export it here
 
 /// Controls which tools are registered at startup.
 /// Read from `IRIS_TOOLSET` env var or `--toolset` CLI flag.
