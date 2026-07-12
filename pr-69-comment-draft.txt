@@ -1,0 +1,10 @@
+Mike — thank you for this. All four findings check out; I independently reproduced every one of them against current master (the 9 clippy violations, --features testing missing from every CI job, and the 104-vs-39 lock gap in test_handlers_live.rs — exact same counts you reported). Real, useful work, and a much more thorough investigation than my own pass turned up.
+
+master had moved since you opened this (I'd already landed an independent fix for the same registry issue, so that one commit was redundant — skipped cleanly, the other four applied with zero conflicts). I tried to push the rebase to your branch directly but don't have write access to your fork outside the PR-merge UI, so I merged it straight to master instead, keeping your four commits and authorship intact via a merge commit.
+
+While verifying against a live IRIS container I found two more real bugs your fix immediately exposed (the exact kind of "never actually ran, so never caught" problem this PR is about):
+
+1. The new live-handler CI step was missing --include-ignored — without it, cargo test's default filtering silently skips almost everything in those 7 files. Fixed, confirmed 598/598 passing.
+2. Merging just now, e2e-tests failed for real on master — 3 of the newly-running live-IRIS test files (test_interop_depth_live, test_iris_admin_observability_live, test_sql_power_live) read `IRIS_PORT`, but CI (and every other test file in the repo) sets `IRIS_WEB_PORT`. They'd been silently falling back to a hardcoded local-dev port default the whole time — worked by accident locally, broke immediately once actually run in CI. Fixed all 4 occurrences (a 4th file has the same bug but isn't wired into CI yet).
+
+Net: merged to master, CI is now fully green end to end (build, fmt, clippy, unit tests, e2e-tests with your live-handler suite, Windows handshake, cross-compile) — first clean run since 044-servermanager-discovery landed. Thanks again for digging into this; closing #69 as merged via a4073ab + c6d3704.

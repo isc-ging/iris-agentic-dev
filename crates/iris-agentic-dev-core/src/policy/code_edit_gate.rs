@@ -215,7 +215,9 @@ mod tests {
     // ── ObjectScript: code-management APIs ────────────────────────────────────
     #[test]
     fn blocks_system_obj_compile() {
-        assert!(check_objectscript_code_edit("do $system.OBJ.Compile(\"My.Class\")", "srv").is_some());
+        assert!(
+            check_objectscript_code_edit("do $system.OBJ.Compile(\"My.Class\")", "srv").is_some()
+        );
     }
 
     #[test]
@@ -228,14 +230,14 @@ mod tests {
 
     #[test]
     fn blocks_system_obj_delete() {
-        assert!(check_objectscript_code_edit("do $SYSTEM.OBJ.Delete(\"My.Class\")", "srv").is_some());
+        assert!(
+            check_objectscript_code_edit("do $SYSTEM.OBJ.Delete(\"My.Class\")", "srv").is_some()
+        );
     }
 
     #[test]
     fn blocks_routine_mgr() {
-        assert!(
-            check_objectscript_code_edit("set r=##class(%RoutineMgr).%New()", "srv").is_some()
-        );
+        assert!(check_objectscript_code_edit("set r=##class(%RoutineMgr).%New()", "srv").is_some());
     }
 
     #[test]
@@ -263,8 +265,11 @@ mod tests {
     #[test]
     fn allows_ordinary_global_and_code() {
         assert!(check_objectscript_code_edit("write $ZVERSION,!", "srv").is_none());
-        assert!(check_objectscript_code_edit("set ^MyApp.Data(1)=\"ok\" write ^MyApp.Data(1)", "srv")
-            .is_none());
+        assert!(check_objectscript_code_edit(
+            "set ^MyApp.Data(1)=\"ok\" write ^MyApp.Data(1)",
+            "srv"
+        )
+        .is_none());
     }
 
     // ── SQL write gate ────────────────────────────────────────────────────────
@@ -276,15 +281,18 @@ mod tests {
 
     #[test]
     fn blocks_sql_delete_dictionary() {
-        assert!(
-            check_sql_code_edit("DELETE FROM %Dictionary.ClassDefinition WHERE ID='X'", "srv")
-                .is_some()
-        );
+        assert!(check_sql_code_edit(
+            "DELETE FROM %Dictionary.ClassDefinition WHERE ID='X'",
+            "srv"
+        )
+        .is_some());
     }
 
     #[test]
     fn allows_sql_write_to_app_table() {
-        assert!(check_sql_code_edit("UPDATE MyApp.Patient SET Name='x' WHERE ID=1", "srv").is_none());
+        assert!(
+            check_sql_code_edit("UPDATE MyApp.Patient SET Name='x' WHERE ID=1", "srv").is_none()
+        );
     }
 
     // ── extract_globals ───────────────────────────────────────────────────────

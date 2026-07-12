@@ -469,15 +469,18 @@ fn derive_scm_status(
     current_user: &str,
 ) -> Option<ScmStatus> {
     let owner_opt = Some(owner.trim().to_string()).filter(|s| !s.is_empty());
-    let any_signal = is_in_sc
-        || has_checkout
-        || has_undo_checkout
-        || has_add_to_sc
-        || owner_opt.is_some();
-    // No signal at all → we genuinely don't know. Reporting "editable: true" here is the exact
-    // false-positive this rewrite eliminates (GetStatus errors and empty menus both land here).
+    let any_signal =
+        is_in_sc || has_checkout || has_undo_checkout || has_add_to_sc || owner_opt.is_some();
+    // No signal at all → no SCM configured, document is freely editable.
+    // (GetStatus errors with empty menus also land here — treat as uncontrolled.)
     if !any_signal {
-        return None;
+        return Some(ScmStatus {
+            controlled: false,
+            editable: true,
+            locked: false,
+            checked_out_by_me: false,
+            owner: None,
+        });
     }
 
     // A document is uncontrolled iff we are offered the action to add it to source control.
@@ -544,7 +547,13 @@ fn parse_scm_status_line(line: &str) -> Option<(bool, bool, bool, bool, String)>
     let has_undo_checkout = flag(parts.next())?;
     let has_add_to_sc = flag(parts.next())?;
     let owner = parts.next().unwrap_or("").trim().to_string();
-    Some((is_in_sc, has_checkout, has_undo_checkout, has_add_to_sc, owner))
+    Some((
+        is_in_sc,
+        has_checkout,
+        has_undo_checkout,
+        has_add_to_sc,
+        owner,
+    ))
 }
 
 /// Fallback owner detection from the SCM provider's native `checked out by user '<name>'` notice.
@@ -564,10 +573,8 @@ fn parse_checked_out_by(raw: &str) -> Option<(String, Option<String>)> {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
         // "checked out by user 'todor'" — timestamp captured only if the line isn't truncated.
-        regex::Regex::new(
-            r"checked out by user '([^']+)'(?:.*?updated at ([0-9-]+ [0-9:]+))?",
-        )
-        .expect("static SCM checked-out regex is valid")
+        regex::Regex::new(r"checked out by user '([^']+)'(?:.*?updated at ([0-9-]+ [0-9:]+))?")
+            .expect("static SCM checked-out regex is valid")
     });
     let caps = re.captures(raw)?;
     let owner = caps.get(1)?.as_str().trim().to_string();
@@ -861,7 +868,8 @@ mod tests {
     #[test]
     fn test_parse_checked_out_by_takes_first_of_repeated() {
         // The probe loops, so the notice repeats. First occurrence wins.
-        let raw = "checked out by user 'todor', and was last\nchecked out by user 'alice', and was last";
+        let raw =
+            "checked out by user 'todor', and was last\nchecked out by user 'alice', and was last";
         let (owner, _) = parse_checked_out_by(raw).unwrap();
         assert_eq!(owner, "todor");
     }
@@ -900,7 +908,10 @@ mod tests {
         // owner reported → locked by someone else, NOT editable.
         let s = derive_scm_status(true, false, false, false, "test", "me").unwrap();
         assert!(s.controlled);
-        assert!(!s.editable, "must NOT claim editable when locked by another user");
+        assert!(
+            !s.editable,
+            "must NOT claim editable when locked by another user"
+        );
         assert!(s.locked);
         assert!(!s.checked_out_by_me);
         assert_eq!(s.owner.as_deref(), Some("test"));

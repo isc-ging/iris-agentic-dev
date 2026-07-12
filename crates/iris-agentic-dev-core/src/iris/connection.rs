@@ -450,11 +450,13 @@ impl IrisConnection {
             // A residual like <ENDOFFILE> is often left as a benign side effect of an
             // SCM provider's internal Read even when the operation fully succeeded;
             // appending it to a non-empty result corrupted otherwise-valid output.
+            // Only surface a non-exception $ZERROR when the body produced NO output.
+            // A residual like <ENDOFFILE> is often left as a benign side effect of an
+            // SCM provider's internal Read even when the operation fully succeeded;
+            // appending it to a non-empty result corrupted otherwise-valid output.
             "  If (out=\"\") && (ze'=\"\") && (ze'=\",\") { Set out = \"ERROR($ZERROR): \"_ze_$Char(10) }"
                 .into(),
-            "  Set qout = $Replace($Replace(out,$Char(34),$Char(34)_$Char(34)),$Char(10),$Char(1))"
-                .into(),
-            "  Do %code.WriteLine(\" Quit \"_$Char(34)_qout_$Char(34))".into(),
+            "  Quit out".into(),
             "}".into(),
             "".into(),
             "}".into(),
@@ -789,7 +791,9 @@ mod system_mode_tests {
             std::env::set_var("IRIS_SERVICE_PASSWORD", "password");
         }
         let c = conn("USER", SystemMode::Development);
-        let svc = c.with_service_account().expect("service account configured");
+        let svc = c
+            .with_service_account()
+            .expect("service account configured");
         // Credentials swapped to the service account…
         assert_eq!(svc.username, "dtetu_mcp");
         assert_eq!(svc.password, "password");

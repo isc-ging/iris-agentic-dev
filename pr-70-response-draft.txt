@@ -1,0 +1,37 @@
+Dorian — thanks for taking the time to write this up, and for the detailed breakdown. I've read through the fork commits and want to give you a real answer on each item.
+
+**The bugs — yes to all, these should merge**
+
+The search fixes are legitimately broken for anyone on IRIS 2024+ or with case-insensitive expectations: the missing `case` flag is a silent wrong-behavior bug, and the v8 array shape change is a real compat break. The `AfterUserAction`/`ERROR #5865` SCM fix is exactly right — I've seen that failure mode and your diagnosis matches. The `iris_doc` delete false-success on locked docs, empty-name `MISSING_PARAMS`, lenient integer deserialization, `$ZERROR/<ENDOFFILE>` corruption, `DOCKER_REQUIRED` → `HTTP_EXECUTION_FAILED` — all of these are correctness fixes with no real downside. I want all of them.
+
+**The features — most yes, one to discuss**
+
+*Code-edit gate* (`CODE_EDIT_BLOCKED` on `%Dictionary`, `$SYSTEM.OBJ`, code globals): yes. This is exactly the right place to enforce it — agents should route code changes through `iris_doc` + `iris_compile`, not sneak them through `iris_execute`. I'd ship this on by default.
+
+*`iris_doc` insert/delete_lines + stale-edit guard (`STALE_CONTENT`)*: yes. The `expected` param as a pre-condition check is a good pattern — prevents stale-context edits silently landing on the wrong lines. This is especially important for long edit sessions.
+
+*Re-numbered post-write content*: yes, very useful for agents that need to chain edits.
+
+*Centralized elicitation resume for all write paths*: yes.
+
+*`IRIS_SEARCH_SYNC_TIMEOUT`*: yes — the 2s hardcode was always fragile.
+
+*`SCOPE_REQUIRED` on search*: yes for the guard, but I'd make the behavior configurable (env flag to disable, default on) rather than always-required — there are legitimate "search all documents" cases.
+
+*Restricted service-account routing (`IRIS_SERVICE_USERNAME/PASSWORD`, isolated cookie jar)*: yes for the env-var pattern and isolation. This is a clean way to split write-privileged tools from read-only tools.
+
+*Prevent CheckIn in SCM tool*: I'd expose this as a flag (`--prevent-checkin`) rather than hardcoding it off. Some users do want agent-assisted check-ins (with elicitation confirming). Default off is fine.
+
+**On the rebase — let's make it easier**
+
+You shouldn't have to rebase 9 upstream commits manually. Here's what I'd suggest:
+
+1. File the bug fixes as a single PR first (search fixes, SCM `AfterUserAction`, doc delete, `MISSING_PARAMS`, integer deserialization, `$ZERROR` fix, `DOCKER_REQUIRED` rename). These are all non-breaking, I can merge them fast and they'll reduce your rebase surface immediately.
+
+2. File the features as a second PR (code-edit gate, insert/delete_lines, stale-edit guard, service-account routing, elicitation resume). These need tests and I want to review them more carefully before they land.
+
+Alternatively, if you want to hand me a branch and let me do the rebase + integration, I'm fine with that too — just point me at the commits.
+
+Either way, this is exactly the kind of contribution I want. The TrakCare context (French Edition, production system, SCM-heavy workflow) is a real deployment scenario that exposed real gaps. Happy to credit you properly in the release notes for each item that lands.
+
+What works best for you?

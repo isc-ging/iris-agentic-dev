@@ -404,7 +404,12 @@ fn gate0_blocks_iris_execute_dictionary_edit() {
         "namespace": "USER",
         "code": r#"set c=##class(%Dictionary.ClassDefinition).%OpenId("My.Class") do c.%Save()"#,
     });
-    let r = dispatch_gate("iris_execute", "iris-dev", Some(&policy_dev_allow()), &params);
+    let r = dispatch_gate(
+        "iris_execute",
+        "iris-dev",
+        Some(&policy_dev_allow()),
+        &params,
+    );
     assert!(r.is_err());
     assert_eq!(r.unwrap_err()["error_code"], "CODE_EDIT_BLOCKED");
 }
@@ -415,7 +420,12 @@ fn gate0_blocks_iris_execute_obj_compile() {
         "namespace": "USER",
         "code": r#"do $system.OBJ.Compile("My.Class","ck")"#,
     });
-    let r = dispatch_gate("iris_execute", "iris-dev", Some(&policy_dev_allow()), &params);
+    let r = dispatch_gate(
+        "iris_execute",
+        "iris-dev",
+        Some(&policy_dev_allow()),
+        &params,
+    );
     assert!(r.is_err());
     assert_eq!(r.unwrap_err()["error_code"], "CODE_EDIT_BLOCKED");
 }
@@ -435,7 +445,12 @@ fn gate0_fires_even_with_no_policy() {
 #[test]
 fn gate0_permits_ordinary_execute() {
     let params = serde_json::json!({ "namespace": "USER", "code": "write $ZVERSION,!" });
-    let r = dispatch_gate("iris_execute", "iris-dev", Some(&policy_dev_allow()), &params);
+    let r = dispatch_gate(
+        "iris_execute",
+        "iris-dev",
+        Some(&policy_dev_allow()),
+        &params,
+    );
     assert!(r.is_ok(), "ordinary ObjectScript must not be blocked");
 }
 
@@ -460,5 +475,8 @@ fn gate0_permits_iris_query_read_of_dictionary() {
         "query": "SELECT Name FROM %Dictionary.CompiledClass",
     });
     let r = dispatch_gate("iris_query", "iris-dev", Some(&policy_dev_allow()), &params);
-    assert!(r.is_ok(), "read-mode %Dictionary introspection must be permitted");
+    assert!(
+        r.is_ok(),
+        "read-mode %Dictionary introspection must be permitted"
+    );
 }

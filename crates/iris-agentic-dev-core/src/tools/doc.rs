@@ -363,7 +363,10 @@ async fn handle_get(
         Ok(n) => n,
         Err(r) => return Ok(r),
     };
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(&name)));
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .get(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -421,7 +424,16 @@ async fn handle_put(
         _ => raw_content,
     };
 
-    write_with_scm(iris, client, name, content, ns, p.compile, elicitation_store).await
+    write_with_scm(
+        iris,
+        client,
+        name,
+        content,
+        ns,
+        p.compile,
+        elicitation_store,
+    )
+    .await
 }
 
 /// Run the SCM pre-write check, then write. Shared by mode=put and the surgical
@@ -655,7 +667,10 @@ async fn handle_delete(
         Ok(n) => n,
         Err(r) => return Ok(r),
     };
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(&name)));
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .delete(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -678,7 +693,9 @@ async fn handle_delete(
     let del_body: serde_json::Value = resp.json().await.unwrap_or_default();
     if let Some(errs) = del_body["status"]["errors"].as_array() {
         if !errs.is_empty() {
-            let msg = errs[0]["error"].as_str().unwrap_or("Document delete failed");
+            let msg = errs[0]["error"]
+                .as_str()
+                .unwrap_or("Document delete failed");
             return err_json("DELETE_FAILED", msg);
         }
     }
@@ -694,7 +711,10 @@ async fn handle_head(
         Ok(n) => n,
         Err(r) => return Ok(r),
     };
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(&name)));
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .head(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -920,9 +940,16 @@ async fn handle_insert(
     let (new_lines, actual_at) = apply_insert(&existing, at, &block);
     let new_content = new_lines.join("\n");
 
-    let result =
-        write_with_scm(iris, client, name, &new_content, &p.namespace, p.compile, elicitation_store)
-            .await?;
+    let result = write_with_scm(
+        iris,
+        client,
+        name,
+        &new_content,
+        &p.namespace,
+        p.compile,
+        elicitation_store,
+    )
+    .await?;
     Ok(finalize_edit(
         iris,
         client,
@@ -1000,8 +1027,7 @@ async fn handle_delete_lines(
         return stale_content_err(diff, start);
     }
 
-    let (new_lines, removed, actual_start, actual_end) =
-        apply_delete_lines(&existing, start, end);
+    let (new_lines, removed, actual_start, actual_end) = apply_delete_lines(&existing, start, end);
     if removed == 0 {
         return err_json(
             "INVALID_PARAMS",
@@ -1013,9 +1039,16 @@ async fn handle_delete_lines(
     }
     let new_content = new_lines.join("\n");
 
-    let result =
-        write_with_scm(iris, client, name, &new_content, &p.namespace, p.compile, elicitation_store)
-            .await?;
+    let result = write_with_scm(
+        iris,
+        client,
+        name,
+        &new_content,
+        &p.namespace,
+        p.compile,
+        elicitation_store,
+    )
+    .await?;
     Ok(finalize_edit(
         iris,
         client,
@@ -1114,7 +1147,10 @@ async fn handle_fragment(
         );
     }
 
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(&name)));
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .get(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -2386,7 +2422,10 @@ mod tests {
     #[test]
     fn test_annotate_edit_merges_fields() {
         let base = ok_json(serde_json::json!({"success": true, "name": "Foo.cls"})).unwrap();
-        let merged = annotate_edit(base, serde_json::json!({"edit": "insert", "lines_added": 2}));
+        let merged = annotate_edit(
+            base,
+            serde_json::json!({"edit": "insert", "lines_added": 2}),
+        );
         let text = merged.content[0].raw.as_text().unwrap().text.clone();
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(v["success"], true);
