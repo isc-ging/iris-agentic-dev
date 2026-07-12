@@ -1,6 +1,6 @@
 //! T015: Unit tests for IrisDocParams elicitation fields.
 
-use iris_agentic_dev_core::tools::{DocMode, IrisDocParams};
+use iris_agentic_dev_core::tools::IrisDocParams;
 
 #[test]
 fn doc_params_elicitation_fields() {
@@ -14,7 +14,7 @@ fn doc_params_elicitation_fields() {
     }"#,
     )
     .unwrap();
-    assert!(matches!(p.mode, DocMode::Put));
+    assert_eq!(p.mode, "put");
     assert_eq!(p.elicitation_id.as_deref(), Some("abc-123"));
     assert_eq!(p.elicitation_answer.as_deref(), Some("yes"));
 }
@@ -25,6 +25,66 @@ fn doc_params_no_elicitation_defaults_to_none() {
         serde_json::from_str(r#"{"mode":"get","name":"MyApp.Patient.cls"}"#).unwrap();
     assert!(p.elicitation_id.is_none());
     assert!(p.elicitation_answer.is_none());
+}
+
+// ── Lenient numeric deserialization (string-or-int) ──────────────────────
+// LLMs frequently serialize numeric args as strings ("214"); a hard serde type
+// error rejects the whole tool call at the JSON-RPC layer and drives a retry loop.
+
+#[test]
+fn doc_params_line_as_string_coerces_to_int() {
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode":"insert","name":"F.cls","line":"214","expected":"x"}"#)
+            .unwrap();
+    assert_eq!(p.line, Some(214));
+}
+
+#[test]
+fn doc_params_start_end_as_strings_coerce() {
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode":"fragment","name":"F.cls","start":"1","end":"5"}"#)
+            .unwrap();
+    assert_eq!(p.start, Some(1));
+    assert_eq!(p.end, Some(5));
+}
+
+#[test]
+fn doc_params_max_results_as_string_coerces() {
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode":"list","pattern":"User.*","max_results":"50"}"#).unwrap();
+    assert_eq!(p.max_results, Some(50));
+}
+
+#[test]
+fn doc_params_line_as_int_still_works() {
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode":"insert","name":"F.cls","line":214,"expected":"x"}"#)
+            .unwrap();
+    assert_eq!(p.line, Some(214));
+}
+
+#[test]
+fn doc_params_numeric_fields_missing_are_none() {
+    let p: IrisDocParams = serde_json::from_str(r#"{"mode":"get","name":"F.cls"}"#).unwrap();
+    assert!(p.line.is_none());
+    assert!(p.start.is_none());
+    assert!(p.end.is_none());
+    assert!(p.max_results.is_none());
+}
+
+#[test]
+fn doc_params_empty_string_int_is_none() {
+    let p: IrisDocParams =
+        serde_json::from_str(r#"{"mode":"insert","name":"F.cls","line":""}"#).unwrap();
+    assert!(p.line.is_none());
+}
+
+#[test]
+fn doc_params_non_numeric_string_errors() {
+    // A genuinely non-numeric value stays an error (documents the coercion boundary).
+    let r: Result<IrisDocParams, _> =
+        serde_json::from_str(r#"{"mode":"insert","name":"F.cls","line":"abc"}"#);
+    assert!(r.is_err());
 }
 
 // ── I-3: Storage block stripping ─────────────────────────────────────────

@@ -46,6 +46,7 @@ impl std::ops::Deref for AnyParams {
 pub mod admin;
 pub mod dict;
 pub mod doc;
+pub mod gate_macro;
 pub mod global;
 pub mod info;
 pub mod interop;
@@ -57,7 +58,8 @@ pub mod skills_tools;
 pub mod symbols_local;
 
 pub use doc::{DocMode, IrisDocParams};
-pub use scm::ScmParams;
+pub use scm::{ScmAction, ScmParams};
+// tool_gate is a macro_export, no need to re-export it here
 
 /// Controls which tools are registered at startup.
 /// Read from `IRIS_TOOLSET` env var or `--toolset` CLI flag.
@@ -1883,6 +1885,13 @@ pub struct IrisTools {
     pub registry: Arc<crate::skills::SkillRegistry>,
     /// Shared HTTP client — created once, reused across all tool calls.
     pub client: Arc<reqwest::Client>,
+    /// Dedicated HTTP client for privileged arbitrary-execution tools running under the
+    /// restricted service account (`IRIS_SERVICE_USERNAME`). Its cookie jar is isolated from
+    /// `client`'s so a CSP session established under the primary (user) identity can never be
+    /// replayed on service-account requests — IRIS honors an existing CSP session cookie over
+    /// request basic-auth, which would otherwise silently run these calls under the primary
+    /// user's %Development-capable identity and reopen the SCM-lock bypass.
+    pub exec_client: Arc<reqwest::Client>,
     /// Ring buffer of recent tool calls for skill_propose pattern mining.
     pub history: Arc<std::sync::Mutex<VecDeque<ToolCallEntry>>>,
     /// Pending elicitation state for SCM dialogs.
@@ -1904,6 +1913,7 @@ pub struct IrisTools {
 impl IrisTools {
     pub fn new(iris: Option<IrisConnection>) -> anyhow::Result<Self> {
         let client = Arc::new(IrisConnection::http_client()?);
+        let exec_client = Arc::new(IrisConnection::http_client()?);
         let conn_state = match iris {
             Some(c) => ConnectionState::from_iris(c, ConnectionSource::EnvVars, None),
             None => ConnectionState::new_disconnected(ConnectionSource::EnvVars),
@@ -1921,6 +1931,7 @@ impl IrisTools {
             config_watcher: Arc::new(std::sync::Mutex::new(None)),
             registry: Arc::new(crate::skills::SkillRegistry::new()),
             client,
+            exec_client,
             history: Arc::new(std::sync::Mutex::new(VecDeque::with_capacity(50))),
             elicitation_store: Arc::new(ElicitationStore::new()),
             log_store: Arc::new(std::sync::Mutex::new(log_store::LogStore::new(
@@ -2081,6 +2092,7 @@ impl IrisTools {
         config_watcher: Option<ConfigWatcher>,
     ) -> anyhow::Result<Self> {
         let client = Arc::new(IrisConnection::http_client()?);
+        let exec_client = Arc::new(IrisConnection::http_client()?);
         let mut router = Self::tool_router();
 
         // Remove tools from MCP tool list based on toolset (T017–T019, T033, FR-004–011).
@@ -2179,6 +2191,7 @@ impl IrisTools {
             config_watcher: Arc::new(std::sync::Mutex::new(config_watcher)),
             registry: Arc::new(registry),
             client,
+            exec_client,
             history: Arc::new(std::sync::Mutex::new(VecDeque::with_capacity(50))),
             elicitation_store: Arc::new(ElicitationStore::new()),
             log_store: Arc::new(std::sync::Mutex::new(log_store::LogStore::new(
@@ -2206,6 +2219,32 @@ impl IrisTools {
     async fn get_iris_reloaded(&self) -> Result<Arc<IrisConnection>, McpError> {
         self.check_reload().await;
         self.get_iris()
+    }
+
+    /// Return the connection AND the HTTP client to use for privileged arbitrary-execution tools
+    /// (`iris_execute`, `iris_query` mode="write", `iris_global` set/kill, `iris_execute_method`).
+    ///
+    /// When `IRIS_SERVICE_USERNAME` is configured, these tools run under that restricted
+    /// least-privilege identity (which must lack `%Development`) so they cannot edit class or
+    /// routine code even via ObjectScript indirection — closing the SCM-lock bypass. In that case
+    /// the returned client is `exec_client`, whose cookie jar is isolated from the primary
+    /// `client`. Pairing the identity with its own cookie jar is required for correctness, not
+    /// just hygiene: IRIS honors an existing CSP session cookie over the request's basic-auth, so
+    /// reusing the primary client (which carries the user's CSP session from doc/scm/compile
+    /// calls) would run these privileged tools under the user's %Development-capable identity
+    /// regardless of the basic-auth header — silently defeating the service-account routing.
+    ///
+    /// When no service account is set, both identity and client fall back to the primary
+    /// connection (unchanged behaviour). SCM / compile / doc tools deliberately keep using
+    /// `get_iris_reloaded()` so checkouts and audit stay attributed to the real user.
+    async fn get_iris_for_exec_with_client(
+        &self,
+    ) -> Result<(Arc<IrisConnection>, Arc<reqwest::Client>), McpError> {
+        let iris = self.get_iris_reloaded().await?;
+        match iris.with_service_account() {
+            Some(svc) => Ok((Arc::new(svc), Arc::clone(&self.exec_client))),
+            None => Ok((iris, Arc::clone(&self.client))),
+        }
     }
 
     /// Returns the active write_tools_enabled flag from connection state.
@@ -3193,9 +3232,18 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
         &self,
         Parameters(p): Parameters<ExecuteParams>,
     ) -> Result<CallToolResult, McpError> {
-        let iris = self.get_iris_reloaded().await?;
+        // Route arbitrary execution through the restricted service account when configured, so it
+        // runs under a least-privilege IRIS identity that cannot edit code (see get_iris_for_exec).
+        // The paired client carries the matching (isolated) cookie jar — see
+        // get_iris_for_exec_with_client for why sharing the primary client would defeat routing.
+        let (iris, exec_client) = self.get_iris_for_exec_with_client().await?;
+        // Diagnostic: the identity this connection will authenticate as, and whether a service
+        // account is configured in the env at this instant. Surfaced in the response so account
+        // routing is directly observable per call instead of inferred.
+        let auth_user = iris.username.clone();
+        let svc_env = std::env::var("IRIS_SERVICE_USERNAME").unwrap_or_default();
         let (sm_server, policy) = self.active_server_manager_policy();
-        let params_json = serde_json::json!({ "namespace": p.namespace });
+        let params_json = serde_json::json!({ "namespace": p.namespace, "code": p.code });
         if let Err(gate) = crate::policy::gate::dispatch_gate(
             "iris_execute",
             sm_server.as_deref().unwrap_or(""),
@@ -3254,7 +3302,7 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
             return ok_json(gate);
         }
         tracing::info!(namespace = %p.namespace, translate_sql = p.translate_sql, "iris_execute");
-        let client = self.http_client();
+        let client = exec_client.as_ref();
         let timeout = std::time::Duration::from_secs(p.timeout);
 
         // &sql macro translation — rewrite before sending to IRIS (035)
@@ -3277,7 +3325,10 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
         )
         .await;
 
-        match gen_result {
+        // The HTTP path is primary. On success we return here; on failure we keep the real cause
+        // so a subsequent docker-fallback failure can report it instead of a misleading
+        // "DOCKER_REQUIRED".
+        let http_err: String = match gen_result {
             Err(_) => {
                 self.record_call("iris_execute", false);
                 return ok_json(serde_json::json!({
@@ -3297,6 +3348,8 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
                     "output": trimmed,
                     "namespace": p.namespace,
                     "method": "http",
+                    "auth_user": auth_user,
+                    "service_account_env": svc_env,
                 });
                 if is_runtime_error {
                     resp["error_code"] = serde_json::Value::String("IRIS_RUNTIME_ERROR".into());
@@ -3318,10 +3371,11 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
                 }
                 return ok_json(resp);
             }
-            Ok(Err(_)) => {
-                // HTTP path failed — fall through to docker exec.
+            Ok(Err(e)) => {
+                // HTTP path failed — keep the real cause; fall through to docker exec.
+                e.to_string()
             }
-        }
+        };
 
         // Fallback: docker exec (requires IRIS_CONTAINER env var).
         let docker_result =
@@ -3339,10 +3393,18 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
                 let msg = e.to_string();
                 self.record_call("iris_execute", false);
                 if msg == "DOCKER_REQUIRED" {
+                    // Docker is not the real problem — HTTP is the primary path and it failed.
+                    // Surface that cause instead of blaming a missing container.
                     ok_json(serde_json::json!({
                         "success": false,
-                        "error_code": "DOCKER_REQUIRED",
-                        "error": format!("iris_execute: HTTP execution failed and IRIS_CONTAINER is not set for docker exec fallback.{DOCKER_REQUIRED_HINT}"),
+                        "error_code": "HTTP_EXECUTION_FAILED",
+                        "error": format!(
+                            "iris_execute: HTTP/Atelier execution failed ({http_err}). \
+                             No docker fallback available (IRIS_CONTAINER not set). \
+                             Verify the Atelier REST endpoint is reachable and the credentials \
+                             have %Service_Object:USE.{DOCKER_REQUIRED_HINT}"
+                        ),
+                        "http_error": http_err,
                     }))
                 } else {
                     ok_json(serde_json::json!({
@@ -3387,7 +3449,7 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
     }
 
     #[tool(
-        description = "Read, write, delete, or check an IRIS document. mode='get' fetches source, mode='put' writes (with automatic SCM checkout if needed), mode='delete' removes, mode='head' checks existence. Supports batch ops via 'names' array and elicitation_id/elicitation_answer for SCM dialog resumption. No Python required."
+        description = "Read/write/delete IRIS documents. mode: get (fetch source), put (write, auto SCM checkout), delete, head (existence), fragment (read lines start..end), compiled (read INT), list (glob `pattern`), insert (splice `content` before 1-based `line`; omit `line` to append), delete_lines (remove start..end). `name` is required for all single-document modes; `line`/`start`/`end` are integers. For insert with an explicit `line` and for delete_lines, pass `expected` (current text at the target lines) or the edit is refused with STALE_CONTENT. Edits return the re-numbered post-write `content` to chain from. Batch via `names`; SCM dialogs resume via elicitation_id/elicitation_answer."
     )]
     async fn iris_doc(
         &self,
@@ -3414,7 +3476,8 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
         // Policy gate (044 + 051): fires before role gate.
         let (sm_server_q, policy_q) = self.active_server_manager_policy();
         {
-            let params_json = serde_json::json!({ "namespace": p.namespace, "mode": mode });
+            let params_json =
+                serde_json::json!({ "namespace": p.namespace, "mode": mode, "query": p.query });
             if let Err(gate) = crate::policy::gate::dispatch_gate(
                 "iris_query",
                 sm_server_q.as_deref().unwrap_or(""),
@@ -3511,9 +3574,11 @@ do ##class(%UnitTest.Manager).RunTest("{pattern}","{flags}","{token}")"#,
                 return result;
             }
             "write" => {
-                let iris = self.get_iris_reloaded().await?;
-                let client = self.http_client();
-                let result = iris_query_write(&iris, client, &p).await;
+                // DML runs under the restricted service account when configured (least-privilege).
+                // Use the paired client so the service-account identity isn't overridden by the
+                // primary user's CSP session cookie (see get_iris_for_exec_with_client).
+                let (iris, exec_client) = self.get_iris_for_exec_with_client().await?;
+                let result = iris_query_write(&iris, exec_client.as_ref(), &p).await;
                 self.record_call(
                     "iris_query",
                     result.as_ref().map(is_success).unwrap_or(false),
@@ -5055,7 +5120,16 @@ Methods:
         &self,
         Parameters(p): Parameters<global::IrisGlobalParams>,
     ) -> Result<CallToolResult, McpError> {
-        let iris = self.get_iris_reloaded().await?;
+        // Mutating actions (set/kill) run under the restricted service account when configured;
+        // read-only actions (get/list) stay on the primary connection.
+        let is_write = matches!(p.action.as_str(), "set" | "kill");
+        // Pair the identity with its matching cookie jar: write actions run under the service
+        // account via exec_client (isolated CSP session), reads stay on the primary connection.
+        let (iris, exec_client) = if is_write {
+            self.get_iris_for_exec_with_client().await?
+        } else {
+            (self.get_iris_reloaded().await?, Arc::clone(&self.client))
+        };
         let (sm_server, policy) = self.active_server_manager_policy();
         let params_json = serde_json::json!({
             "action": p.action,
@@ -5081,7 +5155,7 @@ Methods:
             );
             return ok_json(gate_err.clone());
         }
-        let result = global::handle_iris_global(&iris, &self.client, &p, gate).await;
+        let result = global::handle_iris_global(&iris, exec_client.as_ref(), &p, gate).await;
         self.write_audit_entry(
             "iris_global",
             sm_server.as_deref().unwrap_or(""),
@@ -5107,7 +5181,10 @@ Methods:
         &self,
         Parameters(p): Parameters<IrisExecuteMethodParams>,
     ) -> Result<CallToolResult, McpError> {
-        let iris = self.get_iris_reloaded().await?;
+        // Invoking an arbitrary ClassMethod by name is the $classmethod indirection vector — route
+        // it through the restricted service account when configured (least-privilege). The paired
+        // client carries the matching cookie jar (see get_iris_for_exec_with_client).
+        let (iris, exec_client) = self.get_iris_for_exec_with_client().await?;
         let (sm_server, policy) = self.active_server_manager_policy();
         let params_json = serde_json::json!({
             "class": p.class,
@@ -5132,7 +5209,7 @@ Methods:
             );
             return ok_json(gate_err.clone());
         }
-        let result = doc::handle_iris_execute_method(&iris, &self.client, &p).await;
+        let result = doc::handle_iris_execute_method(&iris, exec_client.as_ref(), &p).await;
         self.record_call("iris_execute_method", result.is_ok());
         result
     }

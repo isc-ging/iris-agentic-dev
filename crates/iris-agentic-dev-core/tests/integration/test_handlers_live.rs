@@ -12,7 +12,7 @@
 //!   IRIS_USERNAME=_SYSTEM IRIS_PASSWORD=SYS  — override credentials
 
 use iris_agentic_dev_core::iris::connection::{DiscoverySource, IrisConnection};
-use iris_agentic_dev_core::tools::doc::{handle_iris_doc, DocMode, IrisDocParams};
+use iris_agentic_dev_core::tools::doc::{handle_iris_doc, IrisDocParams};
 use iris_agentic_dev_core::tools::info::{
     handle_iris_info, handle_iris_macro, handle_iris_table_info, InfoParams, MacroParams,
     TableInfoParams,
@@ -387,7 +387,7 @@ fn test_handle_iris_doc_get_object_cls() {
         };
         let elicitation_store = iris_agentic_dev_core::elicitation::ElicitationStore::new();
         let p = IrisDocParams {
-            mode: DocMode::Get,
+            mode: "get".to_string(),
             name: Some("%Library.Object.cls".to_string()),
             names: vec![],
             content: None,
@@ -401,6 +401,8 @@ fn test_handle_iris_doc_get_object_cls() {
             pattern: None,
             category: None,
             max_results: None,
+            expected: None,
+            line: None,
         };
         let r = handle_iris_doc(&conn, &client, p, &elicitation_store).await;
         let v = result_json(r);
@@ -431,7 +433,7 @@ fn test_handle_iris_doc_head_object_cls() {
         };
         let elicitation_store = iris_agentic_dev_core::elicitation::ElicitationStore::new();
         let p = IrisDocParams {
-            mode: DocMode::Head,
+            mode: "head".to_string(),
             name: Some("%Library.Object.cls".to_string()),
             names: vec![],
             content: None,
@@ -445,6 +447,8 @@ fn test_handle_iris_doc_head_object_cls() {
             pattern: None,
             category: None,
             max_results: None,
+            expected: None,
+            line: None,
         };
         // Must not panic; any structured JSON response is acceptable
         let r = handle_iris_doc(&conn, &client, p, &elicitation_store).await;
@@ -672,7 +676,7 @@ fn test_handle_iris_doc_batch_get() {
         };
         let elicitation_store = iris_agentic_dev_core::elicitation::ElicitationStore::new();
         let p = IrisDocParams {
-            mode: DocMode::Get,
+            mode: "get".to_string(),
             name: None,
             names: vec![
                 "%Library.Object.cls".to_string(),
@@ -689,6 +693,8 @@ fn test_handle_iris_doc_batch_get() {
             pattern: None,
             category: None,
             max_results: None,
+            expected: None,
+            line: None,
         };
         let r = handle_iris_doc(&conn, &client, p, &elicitation_store).await;
         let v = result_json(r);
@@ -11655,7 +11661,7 @@ async fn test_doc_put_returns_200_with_status_errors() {
         &conn,
         &client,
         iris_agentic_dev_core::tools::doc::IrisDocParams {
-            mode: iris_agentic_dev_core::tools::doc::DocMode::Put,
+            mode: "put".to_string(),
             name: Some("Test.Cls.cls".to_string()),
             names: vec![],
             content: Some("Class Test.Cls {}".to_string()),
@@ -11669,6 +11675,8 @@ async fn test_doc_put_returns_200_with_status_errors() {
             pattern: None,
             category: None,
             max_results: None,
+            expected: None,
+            line: None,
         },
         &elicitation_store,
     )
@@ -11731,7 +11739,7 @@ async fn test_doc_put_compile_non_2xx_compile_request() {
         &conn,
         &client,
         iris_agentic_dev_core::tools::doc::IrisDocParams {
-            mode: iris_agentic_dev_core::tools::doc::DocMode::Put,
+            mode: "put".to_string(),
             name: Some("Test.ConcurrentCompile.cls".to_string()),
             names: vec![],
             content: Some("Class Test.ConcurrentCompile {}".to_string()),
@@ -11745,6 +11753,8 @@ async fn test_doc_put_compile_non_2xx_compile_request() {
             pattern: None,
             category: None,
             max_results: None,
+            expected: None,
+            line: None,
         },
         &elicitation_store,
     )
@@ -11796,7 +11806,7 @@ async fn test_doc_delete_non_2xx_non_404() {
         &conn,
         &client,
         iris_agentic_dev_core::tools::doc::IrisDocParams {
-            mode: iris_agentic_dev_core::tools::doc::DocMode::Delete,
+            mode: "delete".to_string(),
             name: Some("Test.DeleteMe.cls".to_string()),
             names: vec![],
             content: None,
@@ -11810,6 +11820,8 @@ async fn test_doc_delete_non_2xx_non_404() {
             pattern: None,
             category: None,
             max_results: None,
+            expected: None,
+            line: None,
         },
         &elicitation_store,
     )
@@ -11859,7 +11871,7 @@ async fn test_doc_put_non_2xx_upload() {
         &conn,
         &client,
         iris_agentic_dev_core::tools::doc::IrisDocParams {
-            mode: iris_agentic_dev_core::tools::doc::DocMode::Put,
+            mode: "put".to_string(),
             name: Some("Test.ReadOnly.cls".to_string()),
             names: vec![],
             content: Some("Class Test.ReadOnly {}".to_string()),
@@ -11873,6 +11885,8 @@ async fn test_doc_put_non_2xx_upload() {
             pattern: None,
             category: None,
             max_results: None,
+            expected: None,
+            line: None,
         },
         &elicitation_store,
     )
@@ -12251,7 +12265,9 @@ async fn mount_generator_mocks_any_ns(server: &wiremock::MockServer, run_output:
 async fn test_scm_status_uncontrolled_via_wiremock() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    mount_scm_mocks(&server, "UNCONTROLLED\n").await;
+    // SCMSTATUS|isErr|isInSC|editable|hasCheckOut|hasUndoCheckout|hasAddToSC|owner
+    // Not in SC, menu offers AddToSourceControl → uncontrolled.
+    mount_scm_mocks(&server, "SCMSTATUS|0|0|0|0|0|1|\n").await;
 
     let _docker_guard = DOCKER_REQUIRED_LOCK
         .lock()
@@ -12290,8 +12306,8 @@ async fn test_scm_status_uncontrolled_via_wiremock() {
 async fn test_scm_status_controlled_editable_via_wiremock() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    // parse_action_msg("1|alice") → (1, "alice"): editable=true, owner=alice
-    mount_scm_mocks(&server, "1|alice\n").await;
+    // In SC, UndoCheckout enabled → checked out by current user, editable.
+    mount_scm_mocks(&server, "SCMSTATUS|0|1|1|0|1|0|alice\n").await;
 
     let _docker_guard = DOCKER_REQUIRED_LOCK
         .lock()
@@ -12340,8 +12356,8 @@ async fn test_scm_status_controlled_editable_via_wiremock() {
 async fn test_scm_status_controlled_locked_via_wiremock() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    // parse_action_msg("0|bob") → (0, "bob"): editable=false (locked), owner=bob
-    mount_scm_mocks(&server, "0|bob\n").await;
+    // In SC, neither CheckOut nor UndoCheckout available → locked by another user (bob).
+    mount_scm_mocks(&server, "SCMSTATUS|0|1|0|0|0|0|bob\n").await;
 
     let _docker_guard = DOCKER_REQUIRED_LOCK
         .lock()
@@ -12375,6 +12391,17 @@ async fn test_scm_status_controlled_locked_via_wiremock() {
         "should not be editable: {v}"
     );
     assert_eq!(v["locked"].as_bool(), Some(true), "should be locked: {v}");
+    // The whole point of the fix: surface the other user's ownership instead of null.
+    assert_eq!(
+        v["owner"].as_str(),
+        Some("bob"),
+        "must surface the locking user: {v}"
+    );
+    assert_eq!(
+        v["checked_out_by_me"].as_bool(),
+        Some(false),
+        "must not claim we hold the checkout: {v}"
+    );
 }
 
 /// scm menu → returns a list of enabled actions (lines 157-178).

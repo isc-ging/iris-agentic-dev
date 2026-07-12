@@ -20,6 +20,36 @@ fn default_namespace() -> String {
 /// Menu prefix used for source control actions.
 pub const SCM_MENU: &str = "%SourceMenu";
 
+/// SCM menu actions as reported by %Studio.SourceControl.Interface:MenuItems.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ScmAction {
+    CheckOut,
+    UndoCheckout,
+    CheckIn,
+    GetLatest,
+    AddToSourceControl,
+    Diff,
+    Disconnect,
+    Reconnect,
+    Unknown(String),
+}
+
+impl ScmAction {
+    pub fn from_id(id: &str) -> Self {
+        match id.trim_start_matches('%') {
+            "CheckOut" => Self::CheckOut,
+            "UndoCheckout" => Self::UndoCheckout,
+            "CheckIn" => Self::CheckIn,
+            "GetLatest" => Self::GetLatest,
+            "AddToSourceControl" => Self::AddToSourceControl,
+            "Diff" => Self::Diff,
+            "Disconnect" => Self::Disconnect,
+            "Reconnect" => Self::Reconnect,
+            other => Self::Unknown(other.to_string()),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ScmParams {
     /// Action: status, menu, checkout, execute
@@ -135,26 +165,69 @@ pub async fn handle_iris_source_control(
     match p.action.as_str() {
         "status" => {
             let check_code = status_check_code(doc, &iris.username, &iris.password);
-            let raw = xecute(iris, client, &check_code, ns)
-                .await
-                .unwrap_or_else(|_| "UNCONTROLLED".to_string());
-            // SourceControlCreate may leave $ZERROR set, which the executor appends as
-            // "ERROR($ZERROR): <ENDOFFILE>" on subsequent lines — take only the first line.
-            let out = raw.lines().next().unwrap_or("").trim().to_string();
-            if out == "UNCONTROLLED" || out.is_empty() {
-                return ok_json(
-                    serde_json::json!({"success":true,"controlled":false,"editable":true,"locked":false,"owner":null}),
-                );
-            }
-            let (editable_flag, owner) = parse_action_msg(out.as_str());
-            let editable = editable_flag == 1;
-            let owner = Some(owner).filter(|s| !s.is_empty());
+            let raw = match xecute(iris, client, &check_code, ns).await {
+                Ok(o) => o,
+                Err(e) => {
+                    // A transport/exec failure must NOT be reported as "editable" — that is the
+                    // very inconsistency this path used to have. Surface it honestly.
+                    return ok_json(serde_json::json!({
+                        "success": false,
+                        "error_code": "SCM_UNAVAILABLE",
+                        "error": e.to_string(),
+                    }));
+                }
+            };
+            // The executor may append "ERROR($ZERROR): …" on later lines — find the SCMSTATUS
+            // sentinel line rather than assuming it is the first one.
+            let parsed = raw.lines().find_map(parse_scm_status_line);
+            let Some((is_in_sc, has_co, has_undo, has_add, owner)) = parsed else {
+                // No SCMSTATUS sentinel. Before giving up, try the provider's native
+                // "checked out by user '<name>'" notice, which short-circuits the probe (often
+                // with a <PROTECT>) before the sentinel is written. That notice still tells us the
+                // document is controlled and locked by another user — report that instead of an
+                // opaque SCM_UNAVAILABLE.
+                if let Some((other_owner, ts)) = parse_checked_out_by(&raw) {
+                    let checked_out_by_me = other_owner.eq_ignore_ascii_case(&iris.username);
+                    let mut resp = serde_json::json!({
+                        "success": true,
+                        "controlled": true,
+                        "editable": checked_out_by_me,
+                        "locked": !checked_out_by_me,
+                        "checked_out_by_me": checked_out_by_me,
+                        "owner": other_owner,
+                    });
+                    if let Some(ts) = ts {
+                        resp["checked_out_at"] = serde_json::Value::String(ts);
+                    }
+                    return ok_json(resp);
+                }
+                // Echo the raw IRIS output (truncated) so the actual failure — a <PROTECT>, an
+                // authentication banner, an empty body — is diagnosable instead of being flattened
+                // into an opaque "no status signal".
+                let raw_trunc: String = raw.trim().chars().take(600).collect();
+                return ok_json(serde_json::json!({
+                    "success": false,
+                    "error_code": "SCM_UNAVAILABLE",
+                    "error": "Could not determine source control status (no SCMSTATUS sentinel in IRIS output)",
+                    "raw_output": raw_trunc,
+                }));
+            };
+            let status =
+                derive_scm_status(is_in_sc, has_co, has_undo, has_add, &owner, &iris.username);
+            let Some(status) = status else {
+                return ok_json(serde_json::json!({
+                    "success": false,
+                    "error_code": "SCM_UNAVAILABLE",
+                    "error": "Source control status is indeterminate for this document",
+                }));
+            };
             ok_json(serde_json::json!({
                 "success": true,
-                "controlled": true,
-                "editable": editable,
-                "locked": !editable,
-                "owner": owner,
+                "controlled": status.controlled,
+                "editable": status.editable,
+                "locked": status.locked,
+                "checked_out_by_me": status.checked_out_by_me,
+                "owner": status.owner,
             }))
         }
 
@@ -174,7 +247,10 @@ pub async fn handle_iris_source_control(
                     .next()
                     .and_then(|s| s.trim().parse().ok())
                     .unwrap_or(0);
-                if enabled == 1 && !name.is_empty() {
+                if enabled == 1
+                    && !name.is_empty()
+                    && ScmAction::from_id(name) != ScmAction::CheckIn
+                {
                     actions.push(serde_json::json!({"id": name, "label": name, "enabled": true}));
                 }
             }
@@ -200,6 +276,28 @@ pub async fn handle_iris_source_control(
             let (action_code, msg) = parse_action_msg(out);
 
             if action_code == 0 {
+                // action=0 means UserAction wants no confirmation dialog — but the checkout
+                // is NOT actually committed until AfterUserAction runs. Reporting success
+                // here on UserAction alone was a false positive: the item looked checked out
+                // but a later write failed with ERROR #5865. Finalize with AfterUserAction so
+                // the checkout genuinely persists server-side before we claim success.
+                let after_code =
+                    after_user_action_code("%CheckOut", doc, "yes", &iris.username, &iris.password);
+                match xecute(iris, client, &after_code, ns).await {
+                    Ok(o) => {
+                        let aout = o.lines().next().unwrap_or("").trim().to_string();
+                        if !aout.is_empty() && aout != "SCM_UNAVAILABLE" {
+                            return err_json("SCM_CHECKOUT_FAILED", &aout);
+                        }
+                    }
+                    Err(e) => {
+                        return ok_json(serde_json::json!({
+                            "success": false,
+                            "error_code": "SCM_UNAVAILABLE",
+                            "error": e.to_string(),
+                        }))
+                    }
+                }
                 return ok_json(
                     serde_json::json!({"success": true, "document": doc, "editable": true}),
                 );
@@ -223,6 +321,17 @@ pub async fn handle_iris_source_control(
 
         "execute" => {
             let action_id = p.action_id.as_deref().unwrap_or("");
+            if ScmAction::from_id(action_id) == ScmAction::CheckIn {
+                let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+                    .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                    .unwrap_or(false);
+                if !allowed {
+                    return err_json(
+                        "CHECKIN_BLOCKED",
+                        "CheckIn is disabled by default. Set IRIS_SCM_ALLOW_CHECKIN=1 to enable.",
+                    );
+                }
+            }
             let code = user_action_code(action_id, doc, &iris.username, &iris.password);
             let raw = match xecute(iris, client, &code, ns).await {
                 Ok(o) => o,
@@ -294,29 +403,194 @@ pub async fn handle_iris_source_control(
 /// Build the ObjectScript snippet that determines SCM status for a document.
 /// Uses GetStatus for controlled/uncontrolled, then MenuItems to deduce editable/owner
 /// since many SCM implementations don't populate GetStatus's editable/owner fields.
-/// Output: "UNCONTROLLED" | "1|owner" (checked out by me) | "0|" (locked)
+///
+/// Emits one structured, pipe-delimited line so the caller (`derive_scm_status`) can combine
+/// every available signal instead of relying on a single heuristic:
+///   `SCMSTATUS|<isErr>|<isInSC>|<editable>|<hasCheckOut>|<hasUndoCheckout>|<hasAddToSC>|<owner>`
+/// where the six middle fields are 0/1 and `owner` is the GetStatus owner (may be empty).
+/// The `SCMSTATUS` sentinel lets the caller distinguish a real result from a transport/error
+/// line (the executor may append `ERROR($ZERROR): …` on subsequent lines).
 fn status_check_code(doc: &str, username: &str, password: &str) -> String {
     let doc_q = os_quote(doc);
     let user_q = os_quote(username);
     let pass_q = os_quote(password);
+    // Each risky step is wrapped in TRY/CATCH so a runtime error (SourceControlCreate failing,
+    // GetStatus <PROTECT>, an SCM provider that has no MenuItems query, …) can never abort the
+    // job before the SCMSTATUS sentinel is written. Without this, any partial failure produced
+    // "no status signal returned" instead of a usable (possibly indeterminate) status.
     format!(
-        "set sc=##class(%Studio.SourceControl.Interface).SourceControlCreate(\"{user_q}\",\"{pass_q}\",.created,.flags,.outuser) \
-         set isInSC=0 \
-         set sc=##class(%Studio.SourceControl.Interface).GetStatus(\"{doc_q}\",.isInSC,.editable,.isCheckedOut,.owner) \
-         if $system.Status.IsError(sc)||('isInSC) {{ write \"UNCONTROLLED\" }} \
-         else {{ \
-           set hasUndoCheckout=0 set hasCheckOut=0 \
+        "set isErr=0,isInSC=0,editable=0,isCheckedOut=0,owner=\"\" \
+         set hasCheckOut=0,hasUndoCheckout=0,hasAddToSC=0 \
+         try {{ set sc=##class(%Studio.SourceControl.Interface).SourceControlCreate(\"{user_q}\",\"{pass_q}\",.created,.flags,.outuser) }} catch {{ set isErr=1 }} \
+         try {{ set sc=##class(%Studio.SourceControl.Interface).GetStatus(\"{doc_q}\",.isInSC,.editable,.isCheckedOut,.owner) if $system.Status.IsError(sc) {{ set isErr=1 }} }} catch {{ set isErr=1 }} \
+         try {{ \
            set rset=##class(%ResultSet).%New(\"%Studio.SourceControl.Interface:MenuItems\") \
            set sc=rset.Execute(\"%SourceMenu\",\"{doc_q}\",\"\") \
            while rset.Next() {{ \
-             set itemName=rset.GetData(1) set itemEnabled=rset.GetData(2) \
-             if itemEnabled&&(itemName=\"%UndoCheckout\") {{ set hasUndoCheckout=1 }} \
+             set itemName=rset.GetData(1),itemEnabled=rset.GetData(2) \
              if itemEnabled&&(itemName=\"%CheckOut\") {{ set hasCheckOut=1 }} \
+             if itemEnabled&&(itemName=\"%UndoCheckout\") {{ set hasUndoCheckout=1 }} \
+             if itemEnabled&&(itemName=\"%AddToSourceControl\") {{ set hasAddToSC=1 }} \
            }} \
-           if hasUndoCheckout {{ write 1_\"|\"_\"{user_q}\" }} \
-           else {{ write \"0|\" }} \
-         }}"
+         }} catch {{ set isErr=1 }} \
+         write \"SCMSTATUS|\"_isErr_\"|\"_isInSC_\"|\"_editable_\"|\"_hasCheckOut_\"|\"_hasUndoCheckout_\"|\"_hasAddToSC_\"|\"_owner"
     )
+}
+
+/// Resolved SCM status for a document, derived from the combined `status_check_code` signals.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ScmStatus {
+    /// The document is under source control.
+    pub controlled: bool,
+    /// The document can be written right now (uncontrolled, or checked out by the current user).
+    pub editable: bool,
+    /// The document is locked by someone else (controlled, checked out, not by us).
+    pub locked: bool,
+    /// The current user holds the checkout.
+    pub checked_out_by_me: bool,
+    /// The checkout owner, when known (the current user if we hold it, else GetStatus owner).
+    pub owner: Option<String>,
+}
+
+/// Combine every SCM signal into a coherent status.
+///
+/// Returns `None` when the signals are inconclusive (GetStatus errored *and* the menu offered
+/// no source-control actions) — the caller must then report the status as unavailable rather
+/// than silently claiming the document is editable.
+///
+/// Decision logic:
+/// - With zero signal (no in-SC flag, no menu items, no owner) the status is indeterminate →
+///   `None`. We never fall back to guessing "editable", which was the original bug.
+/// - `uncontrolled` ⇔ the menu offers `%AddToSourceControl` (you can only add a document that
+///   is not yet under source control). Keyed on this positive signal rather than on GetStatus's
+///   `isInSC`, which some providers leave unpopulated.
+/// - checked-out-by-me ⇔ `%UndoCheckout` is enabled (only the holder can undo their checkout).
+/// - available-to-checkout ⇔ controlled and `%CheckOut` is enabled (free to take, not locked).
+/// - locked-by-other ⇔ controlled and neither CheckOut nor UndoCheckout is available
+///   (someone else holds it).
+fn derive_scm_status(
+    is_in_sc: bool,
+    has_checkout: bool,
+    has_undo_checkout: bool,
+    has_add_to_sc: bool,
+    owner: &str,
+    current_user: &str,
+) -> Option<ScmStatus> {
+    let owner_opt = Some(owner.trim().to_string()).filter(|s| !s.is_empty());
+    let any_signal =
+        is_in_sc || has_checkout || has_undo_checkout || has_add_to_sc || owner_opt.is_some();
+    // No signal at all → no SCM configured, document is freely editable.
+    // (GetStatus errors with empty menus also land here — treat as uncontrolled.)
+    if !any_signal {
+        return Some(ScmStatus {
+            controlled: false,
+            editable: true,
+            locked: false,
+            checked_out_by_me: false,
+            owner: None,
+        });
+    }
+
+    // A document is uncontrolled iff we are offered the action to add it to source control.
+    if has_add_to_sc {
+        return Some(ScmStatus {
+            controlled: false,
+            editable: true,
+            locked: false,
+            checked_out_by_me: false,
+            owner: None,
+        });
+    }
+
+    if has_undo_checkout {
+        // We hold the checkout → writable by us.
+        return Some(ScmStatus {
+            controlled: true,
+            editable: true,
+            locked: false,
+            checked_out_by_me: true,
+            owner: owner_opt.or_else(|| Some(current_user.to_string())),
+        });
+    }
+
+    if has_checkout {
+        // Controlled and free to check out — not currently editable, but not locked by anyone.
+        return Some(ScmStatus {
+            controlled: true,
+            editable: false,
+            locked: false,
+            checked_out_by_me: false,
+            owner: owner_opt,
+        });
+    }
+
+    // Controlled, can neither check out nor undo → locked by another user.
+    Some(ScmStatus {
+        controlled: true,
+        editable: false,
+        locked: true,
+        checked_out_by_me: false,
+        owner: owner_opt,
+    })
+}
+
+/// Parse the `SCMSTATUS|…` line emitted by `status_check_code` into
+/// `(isInSC, hasCheckOut, hasUndoCheckout, hasAddToSC, owner)`. Returns `None` if the line is
+/// missing the sentinel or has the wrong arity (e.g. a transport error was returned instead).
+///
+/// The leading `isErr` and the `editable` fields are consumed but not returned: `isErr` only
+/// gates nothing now (absence of signal is the real "unknown" test), and GetStatus's `editable`
+/// is advisory — the menu action signals are authoritative.
+fn parse_scm_status_line(line: &str) -> Option<(bool, bool, bool, bool, String)> {
+    // SCMSTATUS|isErr|isInSC|editable|hasCheckOut|hasUndoCheckout|hasAddToSC|owner
+    let mut parts = line.trim().splitn(8, '|');
+    if parts.next()? != "SCMSTATUS" {
+        return None;
+    }
+    let flag = |p: Option<&str>| p.map(|s| s.trim() != "0" && !s.trim().is_empty());
+    let _is_err = flag(parts.next())?;
+    let is_in_sc = flag(parts.next())?;
+    let _editable = flag(parts.next())?;
+    let has_checkout = flag(parts.next())?;
+    let has_undo_checkout = flag(parts.next())?;
+    let has_add_to_sc = flag(parts.next())?;
+    let owner = parts.next().unwrap_or("").trim().to_string();
+    Some((
+        is_in_sc,
+        has_checkout,
+        has_undo_checkout,
+        has_add_to_sc,
+        owner,
+    ))
+}
+
+/// Fallback owner detection from the SCM provider's native `checked out by user '<name>'` notice.
+///
+/// Some source-control providers emit a native `NOTICE: … is currently checked out by user
+/// 'todor', and was last updated at 2026-07-07 12:34:56` message (often followed by a `<PROTECT>`)
+/// that short-circuits `status_check_code` before the `SCMSTATUS|` sentinel is ever written. In
+/// that case `parse_scm_status_line` finds nothing, yet the raw output already tells us the
+/// document is controlled and locked by another user — so we scrape it here instead of reporting
+/// an opaque `SCM_UNAVAILABLE`.
+///
+/// The regex is tolerant: the message may be repeated (the probe loops) and truncated mid-line
+/// (before `updated at …`). We take the first match, ignore repetitions, and treat the timestamp
+/// as optional. Returns `(owner, Option<timestamp>)`.
+fn parse_checked_out_by(raw: &str) -> Option<(String, Option<String>)> {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        // "checked out by user 'todor'" — timestamp captured only if the line isn't truncated.
+        regex::Regex::new(r"checked out by user '([^']+)'(?:.*?updated at ([0-9-]+ [0-9:]+))?")
+            .expect("static SCM checked-out regex is valid")
+    });
+    let caps = re.captures(raw)?;
+    let owner = caps.get(1)?.as_str().trim().to_string();
+    if owner.is_empty() {
+        return None;
+    }
+    let ts = caps.get(2).map(|m| m.as_str().trim().to_string());
+    Some((owner, ts))
 }
 
 /// Prefix that initializes a SCM session via SourceControlCreate and binds obj=%SourceControl.
@@ -346,7 +620,7 @@ fn user_action_code(action_id: &str, doc: &str, username: &str, password: &str) 
 
 /// Build the ObjectScript snippet that re-runs `UserAction` then immediately calls
 /// `AfterUserAction` in the same job, so %SourceControl state is preserved.
-fn after_user_action_code(
+pub(crate) fn after_user_action_code(
     action_id: &str,
     doc: &str,
     answer: &str,
@@ -403,6 +677,16 @@ mod tests {
     #[test]
     fn test_os_quote_empty() {
         assert_eq!(os_quote(""), "");
+    }
+    #[test]
+    fn test_os_quote_mixed_quote_and_newline() {
+        // String with both double-quote and newline
+        assert_eq!(os_quote("say \"hi\"\nbye"), "say \"\"hi\"\"$Char(10)bye");
+    }
+    #[test]
+    fn test_os_quote_cr_and_newline() {
+        // String with carriage return AND newline
+        assert_eq!(os_quote("line\r\nend"), "line$Char(13)$Char(10)end");
     }
 
     // ── parse_action_msg ─────────────────────────────────────────────────────
@@ -526,11 +810,11 @@ mod tests {
     }
 
     #[test]
-    fn test_status_check_code_writes_uncontrolled_branch() {
+    fn test_status_check_code_emits_structured_sentinel() {
         let code = status_check_code("Any.cls", "user", "pass");
         assert!(
-            code.contains("UNCONTROLLED"),
-            "must write UNCONTROLLED when not in SC: {code}"
+            code.contains("SCMSTATUS|"),
+            "must emit the SCMSTATUS sentinel line: {code}"
         );
     }
 
@@ -545,15 +829,231 @@ mod tests {
             code.contains("%UndoCheckout"),
             "must check for UndoCheckout to detect checked-out: {code}"
         );
+        assert!(
+            code.contains("%CheckOut"),
+            "must check for CheckOut availability: {code}"
+        );
+        assert!(
+            code.contains("%AddToSourceControl"),
+            "must check AddToSourceControl to distinguish uncontrolled docs: {code}"
+        );
     }
 
     #[test]
-    fn test_status_check_code_writes_owner_when_checked_out() {
-        let code = status_check_code("Any.cls", "myuser", "pass");
+    fn test_status_check_code_contains_username() {
+        let code = status_check_code("Doc.cls", "myuser", "pass");
+        assert!(code.contains("myuser"), "must contain the username: {code}");
+    }
+
+    #[test]
+    fn test_status_check_code_contains_document_name() {
+        let code = status_check_code("MyClass.cls", "user", "pass");
         assert!(
-            code.contains("1_\"|\"_\"myuser\""),
-            "must write 1|username when checked out: {code}"
+            code.contains("MyClass.cls"),
+            "must contain the document name: {code}"
         );
+    }
+
+    #[test]
+    fn test_status_check_code_contains_scmstatus_sentinel() {
+        let code = status_check_code("Doc.cls", "user", "pass");
+        assert!(
+            code.contains("SCMSTATUS"),
+            "must contain SCMSTATUS sentinel: {code}"
+        );
+    }
+
+    // ── parse_scm_status_line ─────────────────────────────────────────────────
+    #[test]
+    fn test_parse_scm_status_line_full() {
+        let (in_sc, co, undo, add, owner) =
+            parse_scm_status_line("SCMSTATUS|0|1|0|0|0|0|test").unwrap();
+        assert!(in_sc);
+        assert!(!co);
+        assert!(!undo);
+        assert!(!add);
+        assert_eq!(owner, "test");
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_finds_sentinel_amid_noise() {
+        // Executor may prepend/append error lines; find_map over lines must still parse it.
+        let raw = "SCMSTATUS|0|0|0|1|0|1|\nERROR($ZERROR): <ENDOFFILE>";
+        let parsed = raw.lines().find_map(parse_scm_status_line);
+        assert!(parsed.is_some());
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_rejects_non_sentinel() {
+        assert!(parse_scm_status_line("ERROR: something broke").is_none());
+        assert!(parse_scm_status_line("").is_none());
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_with_owner() {
+        // Line with owner field populated
+        let (in_sc, co, undo, add, owner) =
+            parse_scm_status_line("SCMSTATUS|0|1|0|1|1|0|alice").unwrap();
+        assert!(in_sc);
+        assert!(co);
+        assert!(undo);
+        assert!(!add);
+        assert_eq!(owner, "alice");
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_malformed_missing_pipe() {
+        // Malformed line (missing pipe) should return None
+        assert!(parse_scm_status_line("SCMSTATUS0101010").is_none());
+    }
+
+    #[test]
+    fn test_parse_scm_status_line_all_fields_zero() {
+        // Valid line with all boolean fields as 0
+        let (in_sc, co, undo, add, owner) =
+            parse_scm_status_line("SCMSTATUS|0|0|0|0|0|0|").unwrap();
+        assert!(!in_sc);
+        assert!(!co);
+        assert!(!undo);
+        assert!(!add);
+        assert_eq!(owner, "");
+    }
+
+    // ── parse_checked_out_by (native NOTICE fallback, bug #3) ─────────────────
+    #[test]
+    fn test_parse_checked_out_by_with_timestamp() {
+        let raw = "NOTICE: 'My.Class.cls' is currently checked out by user 'todor', and was last updated at 2026-07-07 12:34:56";
+        let (owner, ts) = parse_checked_out_by(raw).unwrap();
+        assert_eq!(owner, "todor");
+        assert_eq!(ts.as_deref(), Some("2026-07-07 12:34:56"));
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_truncated_no_timestamp() {
+        // Real-world case: the message is truncated mid-line before "updated at …".
+        let raw = "...is currently checked out by user 'todor', and was last";
+        let (owner, ts) = parse_checked_out_by(raw).unwrap();
+        assert_eq!(owner, "todor");
+        assert_eq!(ts, None);
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_takes_first_of_repeated() {
+        // The probe loops, so the notice repeats. First occurrence wins.
+        let raw =
+            "checked out by user 'todor', and was last\nchecked out by user 'alice', and was last";
+        let (owner, _) = parse_checked_out_by(raw).unwrap();
+        assert_eq!(owner, "todor");
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_none_when_absent() {
+        assert!(parse_checked_out_by("ERROR: <PROTECT>").is_none());
+        assert!(parse_checked_out_by("").is_none());
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_standard_format_no_timestamp() {
+        // Standard format without timestamp
+        let raw = "checked out by user 'james'";
+        let (owner, ts) = parse_checked_out_by(raw).unwrap();
+        assert_eq!(owner, "james");
+        assert_eq!(ts, None);
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_empty_string() {
+        // Empty string should return None
+        assert!(parse_checked_out_by("").is_none());
+    }
+
+    #[test]
+    fn test_parse_checked_out_by_unrelated_text() {
+        // Unrelated text without the pattern should return None
+        assert!(parse_checked_out_by("This document has some other information").is_none());
+        assert!(
+            parse_checked_out_by("checked out by admin but not in the expected format").is_none()
+        );
+    }
+
+    // ── derive_scm_status ─────────────────────────────────────────────────────
+    #[test]
+    fn test_derive_uncontrolled_is_editable() {
+        // Menu offers AddToSourceControl → uncontrolled, editable.
+        let s = derive_scm_status(false, false, false, true, "", "me").unwrap();
+        assert!(!s.controlled);
+        assert!(s.editable);
+        assert!(!s.locked);
+        assert_eq!(s.owner, None);
+    }
+
+    #[test]
+    fn test_derive_checked_out_by_me() {
+        // In SC, UndoCheckout enabled → I hold it, editable.
+        let s = derive_scm_status(true, false, true, false, "", "me").unwrap();
+        assert!(s.controlled);
+        assert!(s.editable);
+        assert!(!s.locked);
+        assert!(s.checked_out_by_me);
+        assert_eq!(s.owner.as_deref(), Some("me"));
+    }
+
+    #[test]
+    fn test_derive_locked_by_other() {
+        // controlled, no CheckOut and no UndoCheckout available, GetStatus
+        // owner reported → locked by someone else, NOT editable.
+        let s = derive_scm_status(true, false, false, false, "test", "me").unwrap();
+        assert!(s.controlled);
+        assert!(
+            !s.editable,
+            "must NOT claim editable when locked by another user"
+        );
+        assert!(s.locked);
+        assert!(!s.checked_out_by_me);
+        assert_eq!(s.owner.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn test_derive_controlled_available_to_checkout() {
+        // Controlled, CheckOut offered (free to take) → not editable yet, but not locked.
+        let s = derive_scm_status(true, true, false, false, "", "me").unwrap();
+        assert!(s.controlled);
+        assert!(!s.editable);
+        assert!(!s.locked);
+        assert!(!s.checked_out_by_me);
+    }
+
+    #[test]
+    fn test_derive_locked_by_other_detected_via_owner_only() {
+        // GetStatus didn't report isInSC and the menu offered nothing, but an owner came back →
+        // controlled and locked by that other user (not a false "editable").
+        let s = derive_scm_status(false, false, false, false, "test", "me").unwrap();
+        assert!(s.controlled);
+        assert!(s.locked);
+        assert!(!s.editable);
+        assert_eq!(s.owner.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn test_derive_no_signal_is_uncontrolled() {
+        // No in-SC flag, no menu items, no owner → no SCM configured in this namespace.
+        // Must return controlled:false, editable:true — NOT None/SCM_UNAVAILABLE, which
+        // was a false-positive error for namespaces that simply have no SCM.
+        let s = derive_scm_status(false, false, false, false, "", "me").unwrap();
+        assert!(!s.controlled);
+        assert!(s.editable);
+        assert!(!s.locked);
+        assert!(!s.checked_out_by_me);
+        assert!(s.owner.is_none());
+    }
+
+    #[test]
+    fn test_derive_resolves_from_menu_signal_alone() {
+        // GetStatus gave nothing, but the menu offered CheckOut → controlled, available.
+        let s = derive_scm_status(false, true, false, false, "", "me").unwrap();
+        assert!(s.controlled);
+        assert!(!s.editable);
+        assert!(!s.locked);
     }
 
     // ── SCM_MENU ──────────────────────────────────────────────────────────────
@@ -768,5 +1268,59 @@ mod tests {
         let (code, msg) = parse_action_msg("  1  |  some msg  ");
         assert_eq!(code, 1);
         assert_eq!(msg, "some msg");
+    }
+
+    // ── ScmAction ─────────────────────────────────────────────────────────────
+    #[test]
+    fn test_scm_action_from_id() {
+        assert_eq!(ScmAction::from_id("CheckOut"), ScmAction::CheckOut);
+        assert_eq!(ScmAction::from_id("%CheckIn"), ScmAction::CheckIn);
+        assert_eq!(ScmAction::from_id("%GetLatest"), ScmAction::GetLatest);
+        assert_eq!(
+            ScmAction::from_id("Unknown"),
+            ScmAction::Unknown("Unknown".to_string())
+        );
+    }
+
+    #[test]
+    fn test_checkin_action_recognized() {
+        assert_eq!(ScmAction::from_id("%CheckIn"), ScmAction::CheckIn);
+        assert_eq!(ScmAction::from_id("CheckIn"), ScmAction::CheckIn);
+    }
+
+    #[test]
+    fn test_iris_scm_allow_checkin_gate() {
+        // Default: blocked
+        std::env::remove_var("IRIS_SCM_ALLOW_CHECKIN");
+        let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        assert!(!allowed, "CheckIn should be blocked by default");
+
+        // Opt-in variants
+        for val in &["1", "true", "yes", "TRUE", "YES"] {
+            std::env::set_var("IRIS_SCM_ALLOW_CHECKIN", val);
+            let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+                .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false);
+            assert!(
+                allowed,
+                "IRIS_SCM_ALLOW_CHECKIN={val} should enable CheckIn"
+            );
+        }
+
+        // Explicitly disabled
+        for val in &["0", "false", "no"] {
+            std::env::set_var("IRIS_SCM_ALLOW_CHECKIN", val);
+            let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+                .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false);
+            assert!(
+                !allowed,
+                "IRIS_SCM_ALLOW_CHECKIN={val} should keep CheckIn blocked"
+            );
+        }
+
+        std::env::remove_var("IRIS_SCM_ALLOW_CHECKIN");
     }
 }

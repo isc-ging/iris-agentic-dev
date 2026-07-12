@@ -132,6 +132,29 @@ impl IrisConnection {
         }
     }
 
+    /// Return a clone of this connection authenticating as the restricted service account
+    /// configured via `IRIS_SERVICE_USERNAME` / `IRIS_SERVICE_PASSWORD`, or `None` when no
+    /// such account is set.
+    ///
+    /// Used to route privileged arbitrary-execution tools (`iris_execute`, `iris_query`
+    /// mode="write", `iris_global` set/kill) through a least-privilege IRIS identity that lacks
+    /// code-editing rights (no `%Development`), so those tools cannot edit class/routine code
+    /// even via ObjectScript indirection — while SCM / audit-sensitive tools keep running under
+    /// the primary (user) identity so checkouts and audit stay attributed to the real user.
+    ///
+    /// Enforcement lives in IRIS privileges (the service role), not in a string filter: a bare
+    /// `IRIS_SERVICE_USERNAME` with insufficient rights is what closes the bypass.
+    pub fn with_service_account(&self) -> Option<IrisConnection> {
+        let username = std::env::var("IRIS_SERVICE_USERNAME")
+            .ok()
+            .filter(|s| !s.is_empty())?;
+        let password = std::env::var("IRIS_SERVICE_PASSWORD").unwrap_or_default();
+        let mut c = self.clone();
+        c.username = username;
+        c.password = password;
+        Some(c)
+    }
+
     /// Build the full Atelier REST URL for a given path suffix.
     pub fn atelier_url(&self, path: &str) -> String {
         format!(
@@ -253,11 +276,23 @@ impl IrisConnection {
                 Ok(output) => return Ok(output),
                 Err(e) => {
                     let msg = e.to_string();
-                    // Only retry on network errors or 5xx; 4xx are client errors, don't retry.
+                    let msg_lower = msg.to_ascii_lowercase();
+                    // Only retry on transient network errors or 5xx; 4xx are client errors
+                    // (e.g. 401 auth) and must NOT be retried. The extra patterns cover cold-start
+                    // failures on the first call: DNS not warm, TLS handshake, connection reset,
+                    // or a half-open pooled connection surfacing as EOF / broken pipe.
                     let is_retryable = msg.contains("HTTP 5")
-                        || msg.contains("error sending request")
-                        || msg.contains("connection refused")
-                        || msg.contains("timed out");
+                        || msg_lower.contains("error sending request")
+                        || msg_lower.contains("connection refused")
+                        || msg_lower.contains("connection reset")
+                        || msg_lower.contains("connection closed")
+                        || msg_lower.contains("broken pipe")
+                        || msg_lower.contains("unexpected end of file")
+                        || msg_lower.contains("eof")
+                        || msg_lower.contains("dns")
+                        || msg_lower.contains("handshake")
+                        || msg_lower.contains("timed out")
+                        || msg_lower.contains("timeout");
                     if !is_retryable || attempt == delays.len() - 1 {
                         return Err(e);
                     }
@@ -396,9 +431,11 @@ impl IrisConnection {
             "  } Catch ex {".into(),
             "    Write \"ERROR: \",ex.DisplayString(),!".into(),
             "  }".into(),
-            // Surface non-exception errors (e.g. OPEN failure sets $ZERROR but doesn't throw).
-            "  If ($ZError'=\"\") && ($ZError'=\",\") { Write \"ERROR($ZERROR): \",$ZError,! }"
-                .into(),
+            // Snapshot $ZERROR now, before Close/Use/stream operations below can clobber
+            // it. This captures non-exception errors (e.g. an OPEN failure that sets
+            // $ZERROR without throwing) so we can surface them if the body produced no
+            // output — but WITHOUT writing to tmpfile yet (see the out="" test below).
+            "  Set ze = $ZError".into(),
             "  Close tmpfile".into(),
             "  Use savedIO".into(),
             // Read captured output from temp file and return it.
@@ -409,6 +446,16 @@ impl IrisConnection {
             "    While 'stream.AtEnd { Set out = out _ stream.ReadLine() _ $Char(10) }".into(),
             "  }".into(),
             "  Do ##class(%Library.File).Delete(tmpfile)".into(),
+            // Only surface a non-exception $ZERROR when the body produced NO output.
+            // A residual like <ENDOFFILE> is often left as a benign side effect of an
+            // SCM provider's internal Read even when the operation fully succeeded;
+            // appending it to a non-empty result corrupted otherwise-valid output.
+            // Only surface a non-exception $ZERROR when the body produced NO output.
+            // A residual like <ENDOFFILE> is often left as a benign side effect of an
+            // SCM provider's internal Read even when the operation fully succeeded;
+            // appending it to a non-empty result corrupted otherwise-valid output.
+            "  If (out=\"\") && (ze'=\"\") && (ze'=\",\") { Set out = \"ERROR($ZERROR): \"_ze_$Char(10) }"
+                .into(),
             "  Quit out".into(),
             "}".into(),
             "".into(),
@@ -708,6 +755,84 @@ mod system_mode_tests {
             debug_str.contains("IrisConnection"),
             "should be an IrisConnection: {debug_str}"
         );
+    }
+
+    #[test]
+    fn service_account_none_when_env_unset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved_u = std::env::var("IRIS_SERVICE_USERNAME").ok();
+        let saved_p = std::env::var("IRIS_SERVICE_PASSWORD").ok();
+        unsafe {
+            std::env::remove_var("IRIS_SERVICE_USERNAME");
+            std::env::remove_var("IRIS_SERVICE_PASSWORD");
+        }
+        let c = conn("USER", SystemMode::Unknown);
+        assert!(
+            c.with_service_account().is_none(),
+            "no service account configured → None (falls back to primary identity)"
+        );
+        unsafe {
+            if let Some(v) = saved_u {
+                std::env::set_var("IRIS_SERVICE_USERNAME", v);
+            }
+            if let Some(v) = saved_p {
+                std::env::set_var("IRIS_SERVICE_PASSWORD", v);
+            }
+        }
+    }
+
+    #[test]
+    fn service_account_overrides_credentials_only() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved_u = std::env::var("IRIS_SERVICE_USERNAME").ok();
+        let saved_p = std::env::var("IRIS_SERVICE_PASSWORD").ok();
+        unsafe {
+            std::env::set_var("IRIS_SERVICE_USERNAME", "dtetu_mcp");
+            std::env::set_var("IRIS_SERVICE_PASSWORD", "password");
+        }
+        let c = conn("USER", SystemMode::Development);
+        let svc = c
+            .with_service_account()
+            .expect("service account configured");
+        // Credentials swapped to the service account…
+        assert_eq!(svc.username, "dtetu_mcp");
+        assert_eq!(svc.password, "password");
+        // …but every other connection property is preserved (same instance, namespace, mode).
+        assert_eq!(svc.base_url, c.base_url);
+        assert_eq!(svc.namespace, c.namespace);
+        assert_eq!(svc.system_mode, c.system_mode);
+        // Original connection is untouched.
+        assert_eq!(c.username, "_SYSTEM");
+        unsafe {
+            std::env::remove_var("IRIS_SERVICE_USERNAME");
+            std::env::remove_var("IRIS_SERVICE_PASSWORD");
+            if let Some(v) = saved_u {
+                std::env::set_var("IRIS_SERVICE_USERNAME", v);
+            }
+            if let Some(v) = saved_p {
+                std::env::set_var("IRIS_SERVICE_PASSWORD", v);
+            }
+        }
+    }
+
+    #[test]
+    fn service_account_ignored_when_username_empty() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved_u = std::env::var("IRIS_SERVICE_USERNAME").ok();
+        unsafe {
+            std::env::set_var("IRIS_SERVICE_USERNAME", "");
+        }
+        let c = conn("USER", SystemMode::Unknown);
+        assert!(
+            c.with_service_account().is_none(),
+            "empty username must be treated as unset"
+        );
+        unsafe {
+            std::env::remove_var("IRIS_SERVICE_USERNAME");
+            if let Some(v) = saved_u {
+                std::env::set_var("IRIS_SERVICE_USERNAME", v);
+            }
+        }
     }
 
     #[test]
@@ -1135,5 +1260,145 @@ mod additional_tests {
         let raw = "USER>\n\nhello\n\nUSER>\n";
         let stripped = strip_iris_banner(raw);
         assert_eq!(stripped.trim(), "hello");
+    }
+
+    // ── is_retryable_error classification logic ───────────────────────────────
+
+    /// Helper to classify error messages as retryable or not.
+    /// Mirrors the classification in execute_via_generator (lines 284-295).
+    fn classify_error_as_retryable(msg: &str) -> bool {
+        let msg_lower = msg.to_ascii_lowercase();
+        msg.contains("HTTP 5")
+            || msg_lower.contains("error sending request")
+            || msg_lower.contains("connection refused")
+            || msg_lower.contains("connection reset")
+            || msg_lower.contains("connection closed")
+            || msg_lower.contains("broken pipe")
+            || msg_lower.contains("unexpected end of file")
+            || msg_lower.contains("eof")
+            || msg_lower.contains("dns")
+            || msg_lower.contains("handshake")
+            || msg_lower.contains("timed out")
+            || msg_lower.contains("timeout")
+    }
+
+    #[test]
+    fn classify_http_5xx_as_retryable() {
+        assert!(classify_error_as_retryable(
+            "HTTP 500 Internal Server Error"
+        ));
+        assert!(classify_error_as_retryable("HTTP 502 Bad Gateway"));
+        assert!(classify_error_as_retryable("HTTP 503 Service Unavailable"));
+        assert!(classify_error_as_retryable("HTTP 504 Gateway Timeout"));
+    }
+
+    #[test]
+    fn classify_http_4xx_as_not_retryable() {
+        assert!(!classify_error_as_retryable("HTTP 401 Unauthorized"));
+        assert!(!classify_error_as_retryable("HTTP 403 Forbidden"));
+        assert!(!classify_error_as_retryable("HTTP 404 Not Found"));
+        assert!(!classify_error_as_retryable("HTTP 400 Bad Request"));
+    }
+
+    #[test]
+    fn classify_connection_refused_as_retryable() {
+        assert!(classify_error_as_retryable("connection refused"));
+        assert!(classify_error_as_retryable("Connection refused"));
+        assert!(classify_error_as_retryable("error: connection refused"));
+    }
+
+    #[test]
+    fn classify_connection_reset_as_retryable() {
+        assert!(classify_error_as_retryable("connection reset"));
+        assert!(classify_error_as_retryable("Connection reset by peer"));
+    }
+
+    #[test]
+    fn classify_connection_closed_as_retryable() {
+        assert!(classify_error_as_retryable("connection closed"));
+        assert!(classify_error_as_retryable(
+            "Connection closed unexpectedly"
+        ));
+    }
+
+    #[test]
+    fn classify_broken_pipe_as_retryable() {
+        assert!(classify_error_as_retryable("broken pipe"));
+        assert!(classify_error_as_retryable("Broken pipe"));
+    }
+
+    #[test]
+    fn classify_eof_as_retryable() {
+        assert!(classify_error_as_retryable("eof"));
+        assert!(classify_error_as_retryable("EOF"));
+        assert!(classify_error_as_retryable("unexpected end of file"));
+        assert!(classify_error_as_retryable("Unexpected End of File"));
+    }
+
+    #[test]
+    fn classify_dns_as_retryable() {
+        assert!(classify_error_as_retryable("dns lookup failed"));
+        assert!(classify_error_as_retryable("DNS resolution error"));
+    }
+
+    #[test]
+    fn classify_handshake_as_retryable() {
+        assert!(classify_error_as_retryable("tls handshake failed"));
+        assert!(classify_error_as_retryable("Handshake error"));
+    }
+
+    #[test]
+    fn classify_timeout_as_retryable() {
+        assert!(classify_error_as_retryable("timed out"));
+        assert!(classify_error_as_retryable("timeout"));
+        assert!(classify_error_as_retryable("Timed Out"));
+        assert!(classify_error_as_retryable("TIMEOUT"));
+    }
+
+    #[test]
+    fn classify_error_sending_request_as_retryable() {
+        assert!(classify_error_as_retryable("error sending request"));
+        assert!(classify_error_as_retryable(
+            "Error sending request to server"
+        ));
+    }
+
+    #[test]
+    fn classify_generic_error_as_not_retryable() {
+        // Generic errors that don't match any retryable pattern → not retryable
+        assert!(!classify_error_as_retryable("invalid json response"));
+        assert!(!classify_error_as_retryable("query execution failed"));
+        assert!(!classify_error_as_retryable(
+            "compilation error: unexpected token"
+        ));
+    }
+
+    #[test]
+    fn classify_case_insensitivity() {
+        // Most patterns are checked against lowercase version, so case variations work
+        assert!(classify_error_as_retryable("Connection Refused"));
+        assert!(classify_error_as_retryable("CONNECTION CLOSED"));
+        assert!(classify_error_as_retryable("Error Sending Request"));
+    }
+
+    #[test]
+    fn classify_combined_message() {
+        // Error messages with multiple keywords — retryable if ANY keyword matches
+        assert!(classify_error_as_retryable(
+            "Failed to send request: connection refused after DNS lookup"
+        ));
+        assert!(classify_error_as_retryable(
+            "HTTP 503 Service Unavailable: timeout waiting for backend"
+        ));
+    }
+
+    #[test]
+    fn classify_empty_string_as_not_retryable() {
+        assert!(!classify_error_as_retryable(""));
+    }
+
+    #[test]
+    fn classify_whitespace_only_as_not_retryable() {
+        assert!(!classify_error_as_retryable("   "));
     }
 }

@@ -381,6 +381,75 @@ fn e2e_symbols_plain_substring_no_regression() {
 // ── iris_doc ──────────────────────────────────────────────────────────────────
 
 #[test]
+fn e2e_doc_empty_args_returns_missing_params_not_16006() {
+    require_iris!();
+    // Regression: empty args default to mode=get with an empty name. Previously this
+    // hit GET /doc/ and surfaced the cryptic IRIS "ERROR #16006: Document '' name is
+    // invalid" (error_code BAD_REQUEST), which pushed the calling model into a loop.
+    // It must now fail fast with MISSING_PARAMS and never reach IRIS.
+    let result = call_tool("iris_doc", serde_json::json!({}));
+    assert_eq!(
+        result["error_code"], "MISSING_PARAMS",
+        "empty args must be MISSING_PARAMS, got: {result}"
+    );
+    let text = result.to_string();
+    assert!(
+        !text.contains("16006"),
+        "must not surface the cryptic IRIS #16006: {result}"
+    );
+    assert_ne!(result["error_code"], "BAD_REQUEST", "{result}");
+}
+
+#[test]
+fn e2e_doc_empty_name_per_read_mode_is_missing_params() {
+    require_iris!();
+    // Every single-document read/delete mode must guard an empty name up front.
+    for mode in ["get", "head", "delete", "compiled"] {
+        let result = call_tool("iris_doc", serde_json::json!({"mode": mode}));
+        assert_eq!(
+            result["error_code"], "MISSING_PARAMS",
+            "mode={mode} with no name must be MISSING_PARAMS: {result}"
+        );
+    }
+    // fragment needs start/end too, but the name guard fires first.
+    let frag = call_tool(
+        "iris_doc",
+        serde_json::json!({"mode":"fragment","start":1,"end":5}),
+    );
+    assert_eq!(frag["error_code"], "MISSING_PARAMS", "{frag}");
+}
+
+#[test]
+fn e2e_doc_stringified_int_not_rpc_rejected() {
+    require_iris!();
+    // Regression: `start`/`end`/`line` sent as strings ("1") used to fail hard at the
+    // JSON-RPC layer (-32602 invalid type), which triggered the caller's retry loop.
+    // They must now coerce, so the response is a normal tool result with no JSON-RPC error.
+    let env = iris_env();
+    let mut msgs = init_msgs();
+    msgs.push(serde_json::json!({
+        "jsonrpc":"2.0","id":2,"method":"tools/call",
+        "params":{"name":"iris_doc","arguments":{
+            "mode":"fragment","name":"%Library.String.cls","start":"1","end":"5"
+        }}
+    }));
+    let responses = mcp_call_timeout(&env, &msgs, 10);
+    let resp = responses
+        .iter()
+        .find(|r| r["id"] == 2)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        resp["error"].is_null(),
+        "stringified ints must not cause a JSON-RPC error (-32602): {resp}"
+    );
+    assert!(
+        resp["result"].is_object(),
+        "expected a normal tool result: {resp}"
+    );
+}
+
+#[test]
 fn e2e_doc_put_with_storage_block_strips_and_succeeds() {
     require_iris!();
     // I-3: Storage blocks must be stripped automatically

@@ -4,8 +4,13 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+/// Internal dispatch enum for iris_doc. NOTE: this is deliberately NOT used as the
+/// `mode` field type. schemars renders an enum field as a `$ref` into `$defs`, and
+/// several MCP tool-use layers (incl. Anthropic's) do not resolve `$ref` in tool
+/// input schemas — the model then cannot construct `mode` and the entire tool call
+/// arrives with empty arguments. To keep the schema flat (no `$defs`/`$ref`), `mode`
+/// is a plain `String` on the params struct and parsed here.
+#[derive(Debug, PartialEq, Eq)]
 pub enum DocMode {
     Get,
     Put,
@@ -14,17 +19,38 @@ pub enum DocMode {
     Fragment,
     Compiled,
     List,
+    Insert,
+    DeleteLines,
 }
 
-fn default_mode() -> DocMode {
-    DocMode::Get
+impl DocMode {
+    /// Parse the string `mode` argument. Case-insensitive. Returns None for unknown.
+    fn parse(s: &str) -> Option<DocMode> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "get" => Some(DocMode::Get),
+            "put" => Some(DocMode::Put),
+            "delete" => Some(DocMode::Delete),
+            "head" => Some(DocMode::Head),
+            "fragment" => Some(DocMode::Fragment),
+            "compiled" => Some(DocMode::Compiled),
+            "list" => Some(DocMode::List),
+            "insert" => Some(DocMode::Insert),
+            "delete_lines" => Some(DocMode::DeleteLines),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IrisDocParams {
-    /// Operation: get=fetch source, put=write, delete=remove, head=check existence. Defaults to "get".
+    /// Operation, one of: get, put, delete, head, fragment, compiled, list, insert,
+    /// delete_lines. Defaults to "get". get=fetch source, put=write whole doc,
+    /// delete=remove, head=check existence, fragment=read a line range, compiled=read
+    /// INT form, list=glob docnames, insert=splice `content` before 1-based `line`
+    /// (omit `line` to append at EOF), delete_lines=remove inclusive `start`..`end`
+    /// (requires `expected`).
     #[serde(default = "default_mode", alias = "action")]
-    pub mode: DocMode,
+    pub mode: String,
     /// Document name e.g. 'MyApp.Patient.cls'
     #[serde(alias = "document")]
     pub name: Option<String>,
@@ -43,11 +69,26 @@ pub struct IrisDocParams {
     /// Saves a round-trip vs calling iris_doc(put) then iris_compile separately.
     #[serde(default)]
     pub compile: bool,
-    // mode=fragment params
-    /// Fragment start line, 1-based inclusive (required for mode=fragment)
+    // mode=fragment / mode=delete_lines params
+    /// Fragment/delete start line, 1-based inclusive (required for mode=fragment and mode=delete_lines)
+    #[serde(default, deserialize_with = "de_opt_i64_lenient")]
     pub start: Option<i64>,
-    /// Fragment end line, 1-based inclusive (required for mode=fragment)
+    /// Fragment/delete end line, 1-based inclusive (required for mode=fragment and mode=delete_lines)
+    #[serde(default, deserialize_with = "de_opt_i64_lenient")]
     pub end: Option<i64>,
+    /// Insertion point for mode=insert: `content` is spliced *before* this 1-based line.
+    /// Use 1 to prepend, or total_lines+1 (or omit) to append at end of file.
+    #[serde(default, deserialize_with = "de_opt_i64_lenient")]
+    pub line: Option<i64>,
+    /// Stale-edit guard. The text you expect to currently occupy the targeted lines
+    /// (for delete_lines: the `start`..`end` block; for insert: the single line currently
+    /// at `line`). If it does not match the live document, the edit is refused with
+    /// STALE_CONTENT instead of silently editing the wrong lines. Compared line-by-line
+    /// after trimming trailing whitespace.
+    ///
+    /// REQUIRED for mode=delete_lines and for a positional insert (when `line` is set).
+    /// Only omit it for an append (mode=insert with no `line`), which is non-destructive.
+    pub expected: Option<String>,
     // mode=compiled params
     /// Compiled form type: "INT" (default) or "OBJ"
     pub compiled_type: Option<String>,
@@ -57,11 +98,49 @@ pub struct IrisDocParams {
     /// Document category filter: "CLS", "MAC", "INT", "INC", or "ALL" (default "ALL")
     pub category: Option<String>,
     /// Max results for mode=list (default 200, max 1000)
+    #[serde(default, deserialize_with = "de_opt_i64_lenient")]
     pub max_results: Option<i64>,
+}
+
+/// Deserialize an optional i64 leniently: accept a JSON number, an integer-valued
+/// float, or a string containing an int ("214"). LLMs frequently serialize numeric
+/// tool-call args as strings; without this, serde rejects the whole call at the
+/// JSON-RPC layer (-32602), which drives the calling model into a retry-then-
+/// drop-args loop. null / empty string → None. A non-numeric string stays an error.
+fn de_opt_i64_lenient<'de, D>(de: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum IntOrStr {
+        Int(i64),
+        Float(f64),
+        Str(String),
+        Null,
+    }
+    match Option::<IntOrStr>::deserialize(de)? {
+        None | Some(IntOrStr::Null) => Ok(None),
+        Some(IntOrStr::Int(i)) => Ok(Some(i)),
+        Some(IntOrStr::Float(f)) => Ok(Some(f as i64)),
+        Some(IntOrStr::Str(s)) => {
+            let t = s.trim();
+            if t.is_empty() {
+                return Ok(None);
+            }
+            t.parse::<i64>()
+                .map(Some)
+                .map_err(|_| D::Error::custom(format!("expected an integer, got string {s:?}")))
+        }
+    }
 }
 
 fn default_namespace() -> String {
     "USER".to_string()
+}
+fn default_mode() -> String {
+    "get".to_string()
 }
 use crate::iris::connection::IrisConnection;
 
@@ -72,6 +151,30 @@ fn ok_json(v: serde_json::Value) -> Result<rmcp::model::CallToolResult, rmcp::Er
 }
 fn err_json(code: &str, msg: &str) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
     ok_json(serde_json::json!({"success": false, "error_code": code, "error": msg}))
+}
+
+/// Return the trimmed document name, or a MISSING_PARAMS result if absent/blank.
+/// Single-document read modes (get/head/fragment/compiled) and delete would otherwise
+/// issue a request to `/doc/` with an empty name and surface the cryptic IRIS
+/// `ERROR #16006: Document '' name is invalid` — which reads as a server error and
+/// pushes the calling model into a retry loop. Fail fast and clearly instead.
+fn require_name(p: &IrisDocParams, mode: &str) -> Result<String, rmcp::model::CallToolResult> {
+    match p.name.as_deref().map(str::trim) {
+        Some(n) if !n.is_empty() => Ok(n.to_string()),
+        _ => Err(rmcp::model::CallToolResult::success(vec![
+            rmcp::model::Content::text(
+                serde_json::json!({
+                    "success": false,
+                    "error_code": "MISSING_PARAMS",
+                    "error": format!(
+                        "name (document) is required for mode={mode} and was empty — no request \
+                         was sent. If a previous call lost its arguments, resend with `name` set."
+                    ),
+                })
+                .to_string(),
+            ),
+        ])),
+    }
 }
 /// Map a non-2xx HTTP status to an accurate error code.
 /// IRIS_UNREACHABLE is reserved for transport errors (reqwest send() failures).
@@ -102,7 +205,90 @@ pub async fn handle_iris_doc(
     p: IrisDocParams,
     elicitation_store: &crate::elicitation::ElicitationStore,
 ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
-    match p.mode {
+    // Elicitation resume — user answered a prior SCM checkout dialog. Handled here,
+    // before mode dispatch, so it works for EVERY write path (put and the surgical
+    // insert/delete_lines modes alike). The elicitation store already holds the fully
+    // computed content to write, so we write it directly rather than re-running the
+    // per-mode mutation — otherwise a surgical edit would re-fetch, re-mutate, and
+    // re-trigger the very same checkout dialog in an infinite loop.
+    if let (Some(eid), Some(answer)) = (&p.elicitation_id, &p.elicitation_answer) {
+        if let Some(pending) = elicitation_store.lookup(eid) {
+            elicitation_store.clear(eid);
+            if answer.to_lowercase() != "yes" {
+                return ok_json(serde_json::json!({
+                    "success": false,
+                    "error_code": "WRITE_ABORTED",
+                    "error": "User declined checkout",
+                }));
+            }
+            // Finalize the checkout the user just approved. The pre-write check only
+            // ran UserAction (which *offers* the dialog); the checkout is not actually
+            // committed until AfterUserAction is called. Because do_write is a separate
+            // HTTP job, the in-memory %SourceControl session from the pre-write check is
+            // already gone — so without this the write hits ERROR #5865 "not checked out
+            // of source control". AfterUserAction persists the checkout server-side.
+            let after_code = crate::tools::scm::after_user_action_code(
+                "%CheckOut",
+                &pending.document,
+                "yes",
+                &iris.username,
+                &iris.password,
+            );
+            if let Ok(out) = iris
+                .execute_via_generator(&after_code, &pending.namespace, client)
+                .await
+            {
+                let out = out.lines().next().unwrap_or("").trim().to_string();
+                // Non-empty output from after_user_action_code is an SCM error string.
+                if !out.is_empty() {
+                    return err_json("SCM_CHECKOUT_FAILED", &out);
+                }
+            }
+
+            let resume_content = pending.content.as_deref().unwrap_or("");
+            let result = do_write(
+                iris,
+                client,
+                &pending.document,
+                resume_content,
+                &pending.namespace,
+                p.compile,
+            )
+            .await?;
+            // Re-attach the authoritative post-write content + line count so a caller
+            // resuming a surgical edit after the SCM dialog still gets fresh line numbers
+            // to chain from — otherwise it would edit against stale numbers (the exact
+            // failure that can silently corrupt a file across a checkout round-trip).
+            return Ok(finalize_edit(
+                iris,
+                client,
+                &pending.document,
+                &pending.namespace,
+                result,
+                serde_json::json!({ "resumed": true }),
+            )
+            .await);
+        }
+        return err_json(
+            "ELICITATION_EXPIRED",
+            "Elicitation session expired or not found",
+        );
+    }
+
+    let mode = match DocMode::parse(&p.mode) {
+        Some(m) => m,
+        None => {
+            return err_json(
+                "INVALID_PARAMS",
+                &format!(
+                    "unknown mode {:?}. Valid: get, put, delete, head, fragment, compiled, \
+                     list, insert, delete_lines.",
+                    p.mode
+                ),
+            )
+        }
+    };
+    match mode {
         DocMode::Get => handle_get(iris, client, p).await,
         DocMode::Put => handle_put(iris, client, p, elicitation_store).await,
         DocMode::Delete => handle_delete(iris, client, p).await,
@@ -110,6 +296,8 @@ pub async fn handle_iris_doc(
         DocMode::Fragment => handle_fragment(iris, client, p).await,
         DocMode::Compiled => handle_compiled(iris, client, p).await,
         DocMode::List => handle_list(iris, client, p).await,
+        DocMode::Insert => handle_insert(iris, client, p, elicitation_store).await,
+        DocMode::DeleteLines => handle_delete_lines(iris, client, p, elicitation_store).await,
     }
 }
 
@@ -171,8 +359,14 @@ async fn handle_get(
         return ok_json(serde_json::json!({"success": true, "documents": results}));
     }
 
-    let name = p.name.as_deref().unwrap_or("");
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(name)));
+    let name = match require_name(&p, "get") {
+        Ok(n) => n,
+        Err(r) => return Ok(r),
+    };
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .get(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -207,32 +401,7 @@ async fn handle_put(
     let name = p.name.as_deref().unwrap_or("");
     let ns = &p.namespace;
 
-    // Elicitation resume — user answered a prior SCM dialog
-    if let (Some(eid), Some(answer)) = (&p.elicitation_id, &p.elicitation_answer) {
-        if let Some(pending) = elicitation_store.lookup(eid) {
-            elicitation_store.clear(eid);
-            if answer.to_lowercase() != "yes" {
-                return ok_json(
-                    serde_json::json!({"success": false, "error_code": "WRITE_ABORTED", "error": "User declined checkout"}),
-                );
-            }
-            // User said yes — proceed with the stored content directly
-            let resume_content = pending.content.as_deref().unwrap_or("");
-            return do_write(
-                iris,
-                client,
-                &pending.document,
-                resume_content,
-                &pending.namespace,
-                p.compile,
-            )
-            .await;
-        }
-        return err_json(
-            "ELICITATION_EXPIRED",
-            "Elicitation session expired or not found",
-        );
-    }
+    // Elicitation resume is handled centrally in handle_iris_doc before dispatch.
 
     // Inject ROUTINE header for .mac/.inc if missing
     let raw_content = p.content.as_deref().unwrap_or("");
@@ -255,6 +424,30 @@ async fn handle_put(
         _ => raw_content,
     };
 
+    write_with_scm(
+        iris,
+        client,
+        name,
+        content,
+        ns,
+        p.compile,
+        elicitation_store,
+    )
+    .await
+}
+
+/// Run the SCM pre-write check, then write. Shared by mode=put and the surgical
+/// edit modes (insert/delete_lines) so they all honour source-control checkout and
+/// the elicitation dialog identically. `content` is the full document body to write.
+async fn write_with_scm(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    name: &str,
+    content: &str,
+    ns: &str,
+    compile: bool,
+    elicitation_store: &crate::elicitation::ElicitationStore,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
     // SCM pre-write check — uses SourceControlCreate for a proper session (HTTP-compatible).
     // %GetImplementationObject does not exist on any IRIS version; use Interface API instead.
     let n = name.replace('"', "\"\""); // ObjectScript double-quote escaping
@@ -279,7 +472,7 @@ async fn handle_put(
                     crate::elicitation::ElicitationAction::Put,
                     Some(content.to_string()),
                     None,
-                    ns.clone(),
+                    ns.to_string(),
                 );
                 return ok_json(serde_json::json!({
                     "success": false,
@@ -295,7 +488,7 @@ async fn handle_put(
         }
     }
 
-    do_write(iris, client, name, content, ns, p.compile).await
+    do_write(iris, client, name, content, ns, compile).await
 }
 
 async fn do_write(
@@ -306,6 +499,17 @@ async fn do_write(
     namespace: &str,
     compile_after: bool,
 ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    // Guard against an empty document name. A blank name PUTs to `/doc/` and IRIS
+    // rejects it with a cryptic `ERROR #16006: Document '' name is invalid` (cat OTH).
+    // This surfaces when a caller's tool-call serialization drops the arguments — turn
+    // it into an actionable error instead of a raw HTTP 400.
+    if name.trim().is_empty() {
+        return err_json(
+            "MISSING_PARAMS",
+            "name (document) is required and was empty — the write was not attempted. \
+             If a previous call lost its arguments, resend with name/content set explicitly.",
+        );
+    }
     // I-3: strip Storage blocks — IRIS 2025.1 UDL parser (#5559) fails on Storage XML.
     // IRIS will auto-generate correct storage on first compile.
     // strip_storage_blocks handles the no-block case cheaply (single pass, no alloc).
@@ -434,7 +638,20 @@ async fn handle_delete(
                 .send()
                 .await
             {
-                Ok(r) if r.status().is_success() => deleted.push(name.clone()),
+                Ok(r) if r.status().is_success() => {
+                    // HTTP 200 doesn't mean the delete happened — a locked / checked-out doc
+                    // (ERROR #5845) still returns 200 with the failure in status.errors. Treat a
+                    // non-empty status.errors as a failure so a locked doc lands in `errors`, not
+                    // `deleted` (same false-positive fix as the single-delete path).
+                    let body: serde_json::Value = r.json().await.unwrap_or_default();
+                    match body["status"]["errors"].as_array() {
+                        Some(errs) if !errs.is_empty() => {
+                            let msg = errs[0]["error"].as_str().unwrap_or("delete failed");
+                            errors.push(serde_json::json!({"name": name, "error": msg}));
+                        }
+                        _ => deleted.push(name.clone()),
+                    }
+                }
                 Ok(r) => errors.push(
                     serde_json::json!({"name": name, "error": format!("HTTP {}", r.status())}),
                 ),
@@ -446,8 +663,14 @@ async fn handle_delete(
         );
     }
 
-    let name = p.name.as_deref().unwrap_or("");
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(name)));
+    let name = match require_name(&p, "delete") {
+        Ok(n) => n,
+        Err(r) => return Ok(r),
+    };
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .delete(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -463,6 +686,19 @@ async fn handle_delete(
         let body_hint = resp.text().await.unwrap_or_default();
         return http_err_json(del_status, body_hint.trim());
     }
+    // Atelier returns HTTP 200 even when the delete failed server-side (e.g. the doc is locked /
+    // checked out → ERROR #5845): the real failure is in the JSON body's status.errors, not the
+    // HTTP status. Without this check we'd report success:true for a delete that never happened —
+    // a dangerous false positive for any caller that trusts it (mirrors the put path above).
+    let del_body: serde_json::Value = resp.json().await.unwrap_or_default();
+    if let Some(errs) = del_body["status"]["errors"].as_array() {
+        if !errs.is_empty() {
+            let msg = errs[0]["error"]
+                .as_str()
+                .unwrap_or("Document delete failed");
+            return err_json("DELETE_FAILED", msg);
+        }
+    }
     ok_json(serde_json::json!({"success": true, "name": name}))
 }
 
@@ -471,8 +707,14 @@ async fn handle_head(
     client: &reqwest::Client,
     p: IrisDocParams,
 ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
-    let name = p.name.as_deref().unwrap_or("");
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(name)));
+    let name = match require_name(&p, "head") {
+        Ok(n) => n,
+        Err(r) => return Ok(r),
+    };
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .head(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -526,6 +768,359 @@ pub fn slice_lines(lines: &[String], start: i64, end: i64) -> (Vec<String>, i64,
     (lines[s..e].to_vec(), actual_start, actual_end, clamped)
 }
 
+/// Splice `block` into `lines` *before* 1-based `at` (content-insert semantics).
+/// `at` is clamped to [1, len+1]; `at = len+1` (or beyond) appends. Returns the
+/// new line vector plus the actual (clamped) insertion point.
+pub fn apply_insert(lines: &[String], at: i64, block: &[String]) -> (Vec<String>, i64) {
+    let len = lines.len() as i64;
+    let actual_at = at.clamp(1, len + 1);
+    let idx = (actual_at - 1) as usize;
+    let mut out = Vec::with_capacity(lines.len() + block.len());
+    out.extend_from_slice(&lines[..idx]);
+    out.extend_from_slice(block);
+    out.extend_from_slice(&lines[idx..]);
+    (out, actual_at)
+}
+
+/// Remove the 1-based inclusive line range [start, end] from `lines`.
+/// Returns (new_lines, removed_count, actual_start, actual_end).
+/// Out-of-range bounds are clamped; a start past EOF removes nothing.
+pub fn apply_delete_lines(lines: &[String], start: i64, end: i64) -> (Vec<String>, i64, i64, i64) {
+    let len = lines.len() as i64;
+    if len == 0 || start > len {
+        return (lines.to_vec(), 0, start.max(1), start.max(1));
+    }
+    let actual_start = start.max(1);
+    let actual_end = end.min(len);
+    if actual_end < actual_start {
+        return (lines.to_vec(), 0, actual_start, actual_end);
+    }
+    let s = (actual_start - 1) as usize;
+    let e = actual_end as usize;
+    let mut out = Vec::with_capacity(lines.len());
+    out.extend_from_slice(&lines[..s]);
+    out.extend_from_slice(&lines[e..]);
+    let removed = actual_end - actual_start + 1;
+    (out, removed, actual_start, actual_end)
+}
+
+/// Compare `expected` (multi-line) against `actual` lines, ignoring trailing
+/// whitespace on each line and a single trailing blank line on either side.
+/// Returns None if they match, or Some((line_offset, expected_line, actual_line))
+/// for the first divergence — a 0-based offset into the compared block.
+pub fn diff_expected(expected: &str, actual: &[String]) -> Option<(usize, String, String)> {
+    let exp: Vec<&str> = expected.lines().collect();
+    // Trim one trailing empty line that often sneaks in from JSON string literals.
+    let exp_len = if exp.last() == Some(&"") {
+        exp.len() - 1
+    } else {
+        exp.len()
+    };
+    for i in 0..exp_len.max(actual.len()) {
+        let e = exp.get(i).map(|s| s.trim_end()).unwrap_or("");
+        let a = actual.get(i).map(|s| s.trim_end()).unwrap_or("");
+        if e != a {
+            return Some((i, e.to_string(), a.to_string()));
+        }
+    }
+    None
+}
+
+/// Build a STALE_CONTENT error result describing the first divergence.
+fn stale_content_err(
+    diff: (usize, String, String),
+    block_start: i64,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let (off, expected, actual) = diff;
+    let line_no = block_start + off as i64;
+    ok_json(serde_json::json!({
+        "success": false,
+        "error_code": "STALE_CONTENT",
+        "error": format!(
+            "Line {line_no} does not match `expected` — the document changed since you \
+             last read it. Re-fetch with mode=get or mode=fragment and retry with current \
+             line numbers."
+        ),
+        "line": line_no,
+        "expected_line": expected,
+        "actual_line": actual,
+    }))
+}
+
+/// Fetch a document's source as a line vector. Returns Ok(None) on 404.
+async fn fetch_doc_lines(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    name: &str,
+    namespace: &str,
+) -> Result<Option<Vec<String>>, rmcp::model::CallToolResult> {
+    let url = iris.versioned_ns_url(namespace, &format!("/doc/{}", urlencoding::encode(name)));
+    let resp = match client
+        .get(&url)
+        .basic_auth(&iris.username, Some(&iris.password))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return Err(err_json("IRIS_UNREACHABLE", &format!("HTTP error: {e}")).unwrap()),
+    };
+    let status = resp.status();
+    if status.as_u16() == 404 {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        let body_hint = resp.text().await.unwrap_or_default();
+        return Err(http_err_json(status, body_hint.trim()).unwrap());
+    }
+    let body: serde_json::Value = resp.json().await.unwrap_or_default();
+    let lines: Vec<String> = body["result"]["content"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Some(lines))
+}
+
+// ── Surgical edits: mode=insert / mode=delete_lines ──────────────────────────
+
+async fn handle_insert(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    p: IrisDocParams,
+    elicitation_store: &crate::elicitation::ElicitationStore,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let name = p.name.as_deref().unwrap_or("");
+    if name.is_empty() {
+        return err_json("MISSING_PARAMS", "name is required for mode=insert");
+    }
+    let block_src = match p.content.as_deref() {
+        Some(c) => c,
+        None => return err_json("MISSING_PARAMS", "content is required for mode=insert"),
+    };
+
+    // A positional insert (explicit `line`) requires `expected` — the line it lands
+    // before — so we never splice into a document that shifted under us. Appending
+    // (no `line`) is non-destructive and needs no anchor.
+    if p.line.is_some() && p.expected.is_none() {
+        return err_json(
+            "MISSING_PARAMS",
+            "expected is required for a positional insert (when `line` is set): pass the line \
+             currently at that position. Omit `line` to append at end of file.",
+        );
+    }
+
+    let existing = match fetch_doc_lines(iris, client, name, &p.namespace).await {
+        Ok(Some(lines)) => lines,
+        Ok(None) => return err_json("NOT_FOUND", &format!("Document not found: {name}")),
+        Err(resp) => return Ok(resp),
+    };
+
+    // Default insertion point: append at end of file.
+    let at = p.line.unwrap_or(existing.len() as i64 + 1);
+    if at < 1 {
+        return err_json("INVALID_PARAMS", "line must be >= 1");
+    }
+
+    // Stale-edit guard: the line currently at `at` must match `expected`.
+    if let Some(exp) = p.expected.as_deref() {
+        let target = existing
+            .get((at - 1) as usize)
+            .cloned()
+            .into_iter()
+            .collect::<Vec<_>>();
+        if let Some(diff) = diff_expected(exp, &target) {
+            return stale_content_err(diff, at);
+        }
+    }
+
+    let block: Vec<String> = block_src.lines().map(|s| s.to_string()).collect();
+    let (new_lines, actual_at) = apply_insert(&existing, at, &block);
+    let new_content = new_lines.join("\n");
+
+    let result = write_with_scm(
+        iris,
+        client,
+        name,
+        &new_content,
+        &p.namespace,
+        p.compile,
+        elicitation_store,
+    )
+    .await?;
+    Ok(finalize_edit(
+        iris,
+        client,
+        name,
+        &p.namespace,
+        result,
+        serde_json::json!({
+            "edit": "insert",
+            "inserted_at": actual_at,
+            "lines_added": block.len(),
+        }),
+    )
+    .await)
+}
+
+async fn handle_delete_lines(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    p: IrisDocParams,
+    elicitation_store: &crate::elicitation::ElicitationStore,
+) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    let name = p.name.as_deref().unwrap_or("");
+    if name.is_empty() {
+        return err_json("MISSING_PARAMS", "name is required for mode=delete_lines");
+    }
+    let start = match p.start {
+        Some(v) => v,
+        None => return err_json("MISSING_PARAMS", "start is required for mode=delete_lines"),
+    };
+    let end = match p.end {
+        Some(v) => v,
+        None => return err_json("MISSING_PARAMS", "end is required for mode=delete_lines"),
+    };
+    if start < 1 {
+        return err_json("INVALID_PARAMS", "start must be >= 1");
+    }
+    if end < start {
+        return err_json(
+            "INVALID_PARAMS",
+            &format!("start ({start}) must be <= end ({end})"),
+        );
+    }
+    // Deleting lines is destructive — `expected` (the block being removed) is
+    // mandatory so a stale line range can't silently delete the wrong code.
+    let expected = match p.expected.as_deref() {
+        Some(e) => e,
+        None => {
+            return err_json(
+                "MISSING_PARAMS",
+                "expected is required for mode=delete_lines: pass the exact text currently \
+                 occupying lines start..end (re-fetch with mode=get/fragment if unsure).",
+            )
+        }
+    };
+
+    let existing = match fetch_doc_lines(iris, client, name, &p.namespace).await {
+        Ok(Some(lines)) => lines,
+        Ok(None) => return err_json("NOT_FOUND", &format!("Document not found: {name}")),
+        Err(resp) => return Ok(resp),
+    };
+
+    if start > existing.len() as i64 {
+        return err_json(
+            "INVALID_PARAMS",
+            &format!(
+                "range {start}-{end} is outside the document (has {} lines)",
+                existing.len()
+            ),
+        );
+    }
+
+    // Stale-edit guard: the block at start..end must match `expected` before we cut it.
+    let target = slice_lines(&existing, start, end).0;
+    if let Some(diff) = diff_expected(expected, &target) {
+        return stale_content_err(diff, start);
+    }
+
+    let (new_lines, removed, actual_start, actual_end) = apply_delete_lines(&existing, start, end);
+    if removed == 0 {
+        return err_json(
+            "INVALID_PARAMS",
+            &format!(
+                "range {start}-{end} is outside the document (has {} lines)",
+                existing.len()
+            ),
+        );
+    }
+    let new_content = new_lines.join("\n");
+
+    let result = write_with_scm(
+        iris,
+        client,
+        name,
+        &new_content,
+        &p.namespace,
+        p.compile,
+        elicitation_store,
+    )
+    .await?;
+    Ok(finalize_edit(
+        iris,
+        client,
+        name,
+        &p.namespace,
+        result,
+        serde_json::json!({
+            "edit": "delete_lines",
+            "deleted_start": actual_start,
+            "deleted_end": actual_end,
+            "lines_removed": removed,
+        }),
+    )
+    .await)
+}
+
+/// Finalize a surgical edit: merge edit metadata, then re-fetch the stored document
+/// so the response carries the *authoritative* post-write content and line count.
+/// This is what lets a caller chain edits without a separate get — critical for .cls,
+/// where IRIS renumbers lines on save (UDL normalization). If the write itself failed
+/// (success:false, e.g. elicitation), we return it untouched without re-fetching.
+async fn finalize_edit(
+    iris: &IrisConnection,
+    client: &reqwest::Client,
+    name: &str,
+    namespace: &str,
+    result: rmcp::model::CallToolResult,
+    extra: serde_json::Value,
+) -> rmcp::model::CallToolResult {
+    // Only re-fetch on a successful write.
+    let succeeded = result
+        .content
+        .first()
+        .and_then(|c| c.raw.as_text())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t.text).ok())
+        .map(|v| v["success"] == serde_json::Value::Bool(true))
+        .unwrap_or(false);
+
+    let mut extra = extra;
+    if succeeded {
+        if let Ok(Some(lines)) = fetch_doc_lines(iris, client, name, namespace).await {
+            if let Some(obj) = extra.as_object_mut() {
+                obj.insert("total_lines".to_string(), serde_json::json!(lines.len()));
+                obj.insert("content".to_string(), serde_json::json!(lines.join("\n")));
+            }
+        }
+    }
+    annotate_edit(result, extra)
+}
+
+/// Merge extra edit-metadata fields into an existing ok_json CallToolResult.
+/// Falls back to returning the original result untouched if anything is unexpected.
+fn annotate_edit(
+    result: rmcp::model::CallToolResult,
+    extra: serde_json::Value,
+) -> rmcp::model::CallToolResult {
+    let text = match result.content.first().and_then(|c| c.raw.as_text()) {
+        Some(t) => t.text.clone(),
+        None => return result,
+    };
+    let mut v: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return result,
+    };
+    if let (Some(obj), Some(extra_obj)) = (v.as_object_mut(), extra.as_object()) {
+        for (k, val) in extra_obj {
+            obj.insert(k.clone(), val.clone());
+        }
+    }
+    rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(v.to_string())])
+}
+
 // ── Phase 3: mode=fragment ────────────────────────────────────────────────────
 
 async fn handle_fragment(
@@ -533,7 +1128,10 @@ async fn handle_fragment(
     client: &reqwest::Client,
     p: IrisDocParams,
 ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
-    let name = p.name.as_deref().unwrap_or("");
+    let name = match require_name(&p, "fragment") {
+        Ok(n) => n,
+        Err(r) => return Ok(r),
+    };
     let start = match p.start {
         Some(v) => v.max(1),
         None => return err_json("MISSING_PARAMS", "start is required for mode=fragment"),
@@ -549,7 +1147,10 @@ async fn handle_fragment(
         );
     }
 
-    let url = iris.versioned_ns_url(&p.namespace, &format!("/doc/{}", urlencoding::encode(name)));
+    let url = iris.versioned_ns_url(
+        &p.namespace,
+        &format!("/doc/{}", urlencoding::encode(&name)),
+    );
     let resp = client
         .get(&url)
         .basic_auth(&iris.username, Some(&iris.password))
@@ -624,7 +1225,10 @@ async fn handle_compiled(
     client: &reqwest::Client,
     p: IrisDocParams,
 ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
-    let name = p.name.as_deref().unwrap_or("");
+    let name = match require_name(&p, "compiled") {
+        Ok(n) => n,
+        Err(r) => return Ok(r),
+    };
     let lower = name.to_lowercase();
 
     // .INC files have no INT form
@@ -646,7 +1250,7 @@ async fn handle_compiled(
         }
     }
 
-    let routine = match derive_routine_name(name) {
+    let routine = match derive_routine_name(&name) {
         Some(r) => r,
         None => {
             return err_json(
@@ -1047,7 +1651,7 @@ mod tests {
     #[test]
     fn test_iris_doc_params_get_mode_default() {
         let p: IrisDocParams = serde_json::from_str(r#"{"name": "Foo.cls"}"#).unwrap();
-        assert!(matches!(p.mode, DocMode::Get));
+        assert!(DocMode::parse(&p.mode) == Some(DocMode::Get));
     }
 
     #[test]
@@ -1056,7 +1660,7 @@ mod tests {
             r#"{"mode": "put", "name": "Foo.cls", "content": "Class Foo {}"}"#,
         )
         .unwrap();
-        assert!(matches!(p.mode, DocMode::Put));
+        assert!(DocMode::parse(&p.mode) == Some(DocMode::Put));
         assert_eq!(p.content.as_deref(), Some("Class Foo {}"));
     }
 
@@ -1064,7 +1668,7 @@ mod tests {
     fn test_iris_doc_params_mode_alias_action() {
         let p: IrisDocParams =
             serde_json::from_str(r#"{"action": "delete", "name": "Foo.cls"}"#).unwrap();
-        assert!(matches!(p.mode, DocMode::Delete));
+        assert!(DocMode::parse(&p.mode) == Some(DocMode::Delete));
     }
 
     #[test]
@@ -1115,14 +1719,14 @@ mod tests {
     fn test_iris_doc_params_head_mode() {
         let p: IrisDocParams =
             serde_json::from_str(r#"{"mode": "head", "name": "Foo.cls"}"#).unwrap();
-        assert!(matches!(p.mode, DocMode::Head));
+        assert!(DocMode::parse(&p.mode) == Some(DocMode::Head));
     }
 
     #[test]
     fn test_iris_doc_params_delete_mode() {
         let p: IrisDocParams =
             serde_json::from_str(r#"{"mode": "delete", "name": "Foo.cls"}"#).unwrap();
-        assert!(matches!(p.mode, DocMode::Delete));
+        assert!(DocMode::parse(&p.mode) == Some(DocMode::Delete));
     }
 
     #[test]
@@ -1637,5 +2241,196 @@ mod tests {
         let text = result.content[0].raw.as_text().unwrap().text.clone();
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(v["error"], "");
+    }
+
+    // ── require_name (empty-name guard for read/delete modes) ──────────────────
+    fn require_name_err_text(json: &str, mode: &str) -> Option<String> {
+        let p: IrisDocParams = serde_json::from_str(json).unwrap();
+        match require_name(&p, mode) {
+            Ok(_) => None,
+            Err(r) => Some(r.content[0].raw.as_text().unwrap().text.clone()),
+        }
+    }
+
+    #[test]
+    fn test_require_name_missing_is_error() {
+        let text = require_name_err_text(r#"{"mode":"get"}"#, "get").expect("should err");
+        assert!(text.contains("MISSING_PARAMS"), "{text}");
+    }
+
+    #[test]
+    fn test_require_name_blank_is_error() {
+        let text =
+            require_name_err_text(r#"{"mode":"head","name":"   "}"#, "head").expect("should err");
+        assert!(text.contains("MISSING_PARAMS"), "{text}");
+        assert!(text.contains("head"), "message names the mode: {text}");
+    }
+
+    #[test]
+    fn test_require_name_present_trims_and_returns() {
+        let p: IrisDocParams =
+            serde_json::from_str(r#"{"mode":"get","name":"  Foo.cls  "}"#).unwrap();
+        assert_eq!(require_name(&p, "get").unwrap(), "Foo.cls");
+    }
+
+    // ── apply_insert ──────────────────────────────────────────────────────────
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_apply_insert_middle() {
+        let lines = v(&["a", "b", "c"]);
+        let (out, at) = apply_insert(&lines, 2, &v(&["X", "Y"]));
+        assert_eq!(out, v(&["a", "X", "Y", "b", "c"]));
+        assert_eq!(at, 2);
+    }
+
+    #[test]
+    fn test_apply_insert_prepend() {
+        let lines = v(&["a", "b"]);
+        let (out, at) = apply_insert(&lines, 1, &v(&["X"]));
+        assert_eq!(out, v(&["X", "a", "b"]));
+        assert_eq!(at, 1);
+    }
+
+    #[test]
+    fn test_apply_insert_append_at_len_plus_1() {
+        let lines = v(&["a", "b"]);
+        let (out, at) = apply_insert(&lines, 3, &v(&["X"]));
+        assert_eq!(out, v(&["a", "b", "X"]));
+        assert_eq!(at, 3);
+    }
+
+    #[test]
+    fn test_apply_insert_beyond_eof_clamps_to_append() {
+        let lines = v(&["a", "b"]);
+        let (out, at) = apply_insert(&lines, 999, &v(&["X"]));
+        assert_eq!(out, v(&["a", "b", "X"]));
+        assert_eq!(at, 3);
+    }
+
+    #[test]
+    fn test_apply_insert_into_empty_doc() {
+        let lines: Vec<String> = vec![];
+        let (out, at) = apply_insert(&lines, 1, &v(&["X"]));
+        assert_eq!(out, v(&["X"]));
+        assert_eq!(at, 1);
+    }
+
+    // ── apply_delete_lines ────────────────────────────────────────────────────
+    #[test]
+    fn test_apply_delete_lines_middle() {
+        let lines = v(&["a", "b", "c", "d"]);
+        let (out, removed, s, e) = apply_delete_lines(&lines, 2, 3);
+        assert_eq!(out, v(&["a", "d"]));
+        assert_eq!(removed, 2);
+        assert_eq!((s, e), (2, 3));
+    }
+
+    #[test]
+    fn test_apply_delete_lines_single() {
+        let lines = v(&["a", "b", "c"]);
+        let (out, removed, _, _) = apply_delete_lines(&lines, 2, 2);
+        assert_eq!(out, v(&["a", "c"]));
+        assert_eq!(removed, 1);
+    }
+
+    #[test]
+    fn test_apply_delete_lines_end_clamped() {
+        let lines = v(&["a", "b", "c"]);
+        let (out, removed, s, e) = apply_delete_lines(&lines, 2, 999);
+        assert_eq!(out, v(&["a"]));
+        assert_eq!(removed, 2);
+        assert_eq!((s, e), (2, 3));
+    }
+
+    #[test]
+    fn test_apply_delete_lines_start_past_eof_removes_nothing() {
+        let lines = v(&["a", "b"]);
+        let (out, removed, _, _) = apply_delete_lines(&lines, 5, 9);
+        assert_eq!(out, lines);
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn test_apply_delete_lines_all() {
+        let lines = v(&["a", "b", "c"]);
+        let (out, removed, _, _) = apply_delete_lines(&lines, 1, 3);
+        assert!(out.is_empty());
+        assert_eq!(removed, 3);
+    }
+
+    // ── diff_expected (stale-edit guard) ──────────────────────────────────────
+    #[test]
+    fn test_diff_expected_match() {
+        let actual = v(&["  Set x = 1", "  Quit x"]);
+        assert_eq!(diff_expected("  Set x = 1\n  Quit x", &actual), None);
+    }
+
+    #[test]
+    fn test_diff_expected_ignores_trailing_whitespace() {
+        let actual = v(&["  Set x = 1   ", "  Quit x"]);
+        assert_eq!(diff_expected("  Set x = 1\n  Quit x", &actual), None);
+    }
+
+    #[test]
+    fn test_diff_expected_ignores_trailing_blank_line() {
+        let actual = v(&["a", "b"]);
+        // Expected has a trailing newline (common from JSON string literals).
+        assert_eq!(diff_expected("a\nb\n", &actual), None);
+    }
+
+    #[test]
+    fn test_diff_expected_reports_first_divergence() {
+        let actual = v(&["a", "X", "c"]);
+        let d = diff_expected("a\nb\nc", &actual);
+        assert_eq!(d, Some((1, "b".to_string(), "X".to_string())));
+    }
+
+    #[test]
+    fn test_diff_expected_detects_length_mismatch() {
+        let actual = v(&["a"]);
+        // Expected two lines, actual has one → divergence at offset 1.
+        let d = diff_expected("a\nb", &actual);
+        assert_eq!(d, Some((1, "b".to_string(), "".to_string())));
+    }
+
+    // ── mode parsing ──────────────────────────────────────────────────────────
+    #[test]
+    fn test_iris_doc_params_insert_mode() {
+        let p: IrisDocParams = serde_json::from_str(
+            r#"{"mode": "insert", "name": "Foo.cls", "line": 10, "content": "  // hi"}"#,
+        )
+        .unwrap();
+        assert!(DocMode::parse(&p.mode) == Some(DocMode::Insert));
+        assert_eq!(p.line, Some(10));
+    }
+
+    #[test]
+    fn test_iris_doc_params_delete_lines_mode() {
+        let p: IrisDocParams = serde_json::from_str(
+            r#"{"mode": "delete_lines", "name": "Foo.cls", "start": 5, "end": 8}"#,
+        )
+        .unwrap();
+        assert!(DocMode::parse(&p.mode) == Some(DocMode::DeleteLines));
+        assert_eq!(p.start, Some(5));
+        assert_eq!(p.end, Some(8));
+    }
+
+    // ── annotate_edit ─────────────────────────────────────────────────────────
+    #[test]
+    fn test_annotate_edit_merges_fields() {
+        let base = ok_json(serde_json::json!({"success": true, "name": "Foo.cls"})).unwrap();
+        let merged = annotate_edit(
+            base,
+            serde_json::json!({"edit": "insert", "lines_added": 2}),
+        );
+        let text = merged.content[0].raw.as_text().unwrap().text.clone();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["success"], true);
+        assert_eq!(v["name"], "Foo.cls");
+        assert_eq!(v["edit"], "insert");
+        assert_eq!(v["lines_added"], 2);
     }
 }
