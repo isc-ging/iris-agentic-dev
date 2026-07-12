@@ -322,7 +322,15 @@ pub async fn handle_iris_source_control(
         "execute" => {
             let action_id = p.action_id.as_deref().unwrap_or("");
             if ScmAction::from_id(action_id) == ScmAction::CheckIn {
-                return err_json("BLOCKED", "CheckIn is not allowed");
+                let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+                    .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                    .unwrap_or(false);
+                if !allowed {
+                    return err_json(
+                        "CHECKIN_BLOCKED",
+                        "CheckIn is disabled by default. Set IRIS_SCM_ALLOW_CHECKIN=1 to enable.",
+                    );
+                }
             }
             let code = user_action_code(action_id, doc, &iris.username, &iris.password);
             let raw = match xecute(iris, client, &code, ns).await {
@@ -939,10 +947,16 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_no_signal_is_indeterminate() {
-        // No in-SC flag, no menu items, no owner → indeterminate → None (caller reports
-        // SCM_UNAVAILABLE), never a false "editable: true".
-        assert!(derive_scm_status(false, false, false, false, "", "me").is_none());
+    fn test_derive_no_signal_is_uncontrolled() {
+        // No in-SC flag, no menu items, no owner → no SCM configured in this namespace.
+        // Must return controlled:false, editable:true — NOT None/SCM_UNAVAILABLE, which
+        // was a false-positive error for namespaces that simply have no SCM.
+        let s = derive_scm_status(false, false, false, false, "", "me").unwrap();
+        assert!(!s.controlled);
+        assert!(s.editable);
+        assert!(!s.locked);
+        assert!(!s.checked_out_by_me);
+        assert!(s.owner.is_none());
     }
 
     #[test]
@@ -1181,8 +1195,44 @@ mod tests {
     }
 
     #[test]
-    fn test_checkin_is_blocked() {
+    fn test_checkin_action_recognized() {
         assert_eq!(ScmAction::from_id("%CheckIn"), ScmAction::CheckIn);
         assert_eq!(ScmAction::from_id("CheckIn"), ScmAction::CheckIn);
+    }
+
+    #[test]
+    fn test_iris_scm_allow_checkin_gate() {
+        // Default: blocked
+        std::env::remove_var("IRIS_SCM_ALLOW_CHECKIN");
+        let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        assert!(!allowed, "CheckIn should be blocked by default");
+
+        // Opt-in variants
+        for val in &["1", "true", "yes", "TRUE", "YES"] {
+            std::env::set_var("IRIS_SCM_ALLOW_CHECKIN", val);
+            let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+                .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false);
+            assert!(
+                allowed,
+                "IRIS_SCM_ALLOW_CHECKIN={val} should enable CheckIn"
+            );
+        }
+
+        // Explicitly disabled
+        for val in &["0", "false", "no"] {
+            std::env::set_var("IRIS_SCM_ALLOW_CHECKIN", val);
+            let allowed = std::env::var("IRIS_SCM_ALLOW_CHECKIN")
+                .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+                .unwrap_or(false);
+            assert!(
+                !allowed,
+                "IRIS_SCM_ALLOW_CHECKIN={val} should keep CheckIn blocked"
+            );
+        }
+
+        std::env::remove_var("IRIS_SCM_ALLOW_CHECKIN");
     }
 }

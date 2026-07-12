@@ -236,19 +236,29 @@ iris-agentic-dev resolves the IRIS connection in this order — first match wins
 | `IRIS_CONTAINER` | *(empty)* | Docker container name — required for Docker-dependent tools |
 | `IRIS_SERVER_NAME` | *(empty)* | Server Manager server name when multiple are configured |
 | `OBJECTSCRIPT_WORKSPACE` | `$PWD` | Workspace root for `.iris-agentic-dev.toml` lookup |
+| `IRIS_SCM_ALLOW_CHECKIN` | *(unset)* | Set to `1` to allow `iris_source_control` to execute CheckIn. Blocked by default. |
+| `IRIS_SEARCH_SYNC_TIMEOUT` | `30` | Seconds to wait for IRIS search index sync before querying (integer). |
+
+### Code-edit gate
+
+Direct writes to class metadata and code-storage structures are blocked regardless of which tool
+is used: `%Dictionary.*Definition` classes, `$SYSTEM.OBJ.*` methods, and code globals
+(`^oddDEF`, `^ROUTINE`, `^rMAC`, `^%Dictionary*`) all return `CODE_EDIT_BLOCKED`. The correct
+workflow is `iris_doc` (put) + `iris_compile` — this keeps SCM attribution intact and goes
+through IRIS's normal compilation pipeline.
 
 ### Privilege separation for arbitrary execution
 
 `iris_execute`, `iris_execute_method`, `iris_query` (`mode="write"`), and `iris_global`
 (`set`/`kill`) can run arbitrary ObjectScript/SQL. Under a `%All` account these can edit class
 and routine code — even by indirection (`$classmethod`, `$method("%Sa"_"ve")`, `xecute`) —
-bypassing the SCM lock and the `CODE_EDIT_BLOCKED` string filter, since no static text filter
-can be exhaustive against a fully-privileged identity.
+bypassing the SCM lock, since no static gate can be exhaustive against a fully-privileged
+identity.
 
 Set `IRIS_SERVICE_USERNAME` / `IRIS_SERVICE_PASSWORD` to a **least-privilege** IRIS account
 (no `%Development` resource, code database mounted read-only). Those four tools then authenticate
 as that account, so code edits fail with `<PROTECT>` at the IRIS privilege layer regardless of
-indirection. Code-writing tools (`iris_document` put, `iris_source_control`, `iris_compile`)
+indirection. Code-writing tools (`iris_doc` put, `iris_source_control`, `iris_compile`)
 deliberately keep using the primary `IRIS_USERNAME`, so SCM checkouts and audit stay attributed
 to the real user. When unset, all tools use the primary connection (unchanged behaviour).
 
@@ -337,13 +347,13 @@ write-gated (suppressed on Live instances unless `IRIS_ALLOW_PROD=1`).
 | Tool | What it does |
 |------|-------------|
 | `iris_compile` | Compile a class, routine, or wildcard. Returns errors with line numbers. |
-| `iris_doc` | Read, write, delete, or check any IRIS document. |
+| `iris_doc` | Read, write, delete, or check any IRIS document. Modes: `get`, `put`, `delete`, `head`, `fragment`, `compiled`, `list`, `insert` (splice at line), `delete_lines` (remove range). Pass `expected` for stale-edit protection (`STALE_CONTENT` on mismatch). Edits return re-numbered post-write content. |
 | `iris_execute` | Run ObjectScript, return output. |
 | `iris_execute_method` | Invoke a `ClassMethod` directly by class+method+args, no boilerplate. String-returning methods only (v1). |
 | `iris_query` | Execute SQL, return rows as JSON. `mode=explain\|count\|write` for query plans, row-count estimates, and gated DML. |
 | `iris_test` | Run `%UnitTest` tests, return structured pass/fail results. |
 | `iris_global` | Read, write, kill, or list IRIS global nodes. PHI and system-blocklist gates enforced. |
-| `iris_source_control` ✦ | Check lock status, checkout, execute SCM actions. |
+| `iris_source_control` ✦ | Check lock status, checkout, execute SCM actions. CheckIn is blocked by default; set `IRIS_SCM_ALLOW_CHECKIN=1` to enable. |
 
 ### Search and introspection
 
@@ -352,7 +362,7 @@ write-gated (suppressed on Live instances unless `IRIS_ALLOW_PROD=1`).
 | `iris_symbols` | Search classes and methods via `%Dictionary`. |
 | `iris_symbols_local` | Search `.cls`/`.mac`/`.inc` files on disk by glob pattern — no IRIS connection required. |
 | `docs_introspect` | Deep class inspection: methods, properties, XData, superclasses. |
-| `iris_search` | Full-text search across the namespace. Supports regex and category filters. |
+| `iris_search` | Full-text search across the namespace. Supports regex, category filters, and case sensitivity. Scope is required (`SCOPE_REQUIRED` otherwise). Compatible with Atelier V1/V2/V8. |
 | `iris_info` | Namespace discovery: documents, jobs, CSP apps, metadata. |
 | `iris_macro` | Macro inspection: list, signature, definition, expand. |
 | `iris_table_info` | Inspect a SQL table: class-projected vs. DDL, backing storage globals, optional row count. |
@@ -425,6 +435,11 @@ See [`light-skills/BENCHMARKING.md`](./light-skills/BENCHMARKING.md) for the ben
 | Connection delays on Windows | `localhost` DNS issue | Use `host = "127.0.0.1"` in `.iris-agentic-dev.toml` |
 | `SERVER_MANAGER_CREDENTIAL_ERROR` | Credential not in OS keychain | VS Code → Server Manager → right-click server → **Reconnect** |
 | `SERVER_MANAGER_AMBIGUOUS` | Multiple SM servers, no `IRIS_SERVER_NAME` | Set `IRIS_SERVER_NAME=<server-key>` (see `check_config` for available names) |
+| `STALE_CONTENT` from `iris_doc` | `expected` text doesn't match current file | Re-fetch the document (`mode=get`) and retry with current content |
+| `SCOPE_REQUIRED` from `iris_search` | Search called with no document scope | Pass at least one category or document type in `scope` |
+| `CODE_EDIT_BLOCKED` | Attempted write to `%Dictionary`, `$SYSTEM.OBJ`, or code globals | Use `iris_doc` (put) + `iris_compile` instead |
+| `CHECKIN_BLOCKED` from `iris_source_control` | CheckIn disabled by default | Set `IRIS_SCM_ALLOW_CHECKIN=1` to enable |
+| `HTTP_EXECUTION_FAILED` from `iris_execute` | Atelier execution failed and no Docker fallback | Verify Atelier endpoint reachable; set `IRIS_CONTAINER` for Docker fallback |
 
 For verbose HTTP logging:
 
