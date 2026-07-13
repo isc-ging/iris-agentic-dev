@@ -16,12 +16,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: clippy, rustfmt
+      - name: Install mold linker
+        run: sudo apt-get install -y mold
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
       # Build binary first (required for mcp_handshake/plugin_dispatch/benchmark_relocated
       # tests, which spawn it as a subprocess).
       - run: cargo build --workspace
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
       # Runs EVERY declared test target across both crates — no hardcoded --test list.
       # A hand-maintained list drifts silently as new #[[test]] targets are added (this
       # bit us for real: 66 of 83 targets were missing from this job before, including
@@ -39,6 +45,7 @@ jobs:
       - run: cargo test --workspace --all-targets --features testing --no-fail-fast -- --test-threads=1
         env:
           RUST_LOG: warn
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
 
   benchmark-lint:
     runs-on: ubuntu-latest
